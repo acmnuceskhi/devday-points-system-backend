@@ -5,15 +5,19 @@ const paginationQuerySchema = z.object({
     offset: z.coerce.number().int().min(0).default(0),
 });
 
-const activityTypeIdParamSchema = z.object({
-    activityTypeId: z.string().uuid("Invalid activity type id"),
+const activityIdParamSchema = z.object({
+    activityId: z.string().uuid("Invalid activity id"),
+});
+
+const submissionIdParamSchema = z.object({
+    submissionId: z.string().uuid("Invalid submission id"),
 });
 
 const completionIdParamSchema = z.object({
     completionId: z.string().uuid("Invalid completion id"),
 });
 
-const createActivityTypeBodySchema = z.object({
+const createActivityBodySchema = z.object({
     code: z
         .string()
         .min(2)
@@ -23,10 +27,11 @@ const createActivityTypeBodySchema = z.object({
     name: z.string().min(2).max(100).transform((value) => value.trim()),
     description: z.string().max(1000).optional(),
     points: z.number().int().min(1).max(1000),
+    activityTypeId: z.string().uuid("Invalid activity type id"),
     isActive: z.boolean().default(true),
 });
 
-const updateActivityTypeBodySchema = z
+const updateActivityBodySchema = z
     .object({
         code: z
             .string()
@@ -38,29 +43,31 @@ const updateActivityTypeBodySchema = z
         name: z.string().min(2).max(100).transform((value) => value.trim()).optional(),
         description: z.string().max(1000).nullable().optional(),
         points: z.number().int().min(1).max(1000).optional(),
+        activityTypeId: z.string().uuid("Invalid activity type id").optional(),
     })
     .refine(
         (value) =>
             value.code !== undefined ||
             value.name !== undefined ||
             value.description !== undefined ||
-            value.points !== undefined,
+            value.points !== undefined ||
+            value.activityTypeId !== undefined,
         { message: "At least one field is required" }
     );
 
-const toggleActivityTypeBodySchema = z.object({
+const toggleActivityBodySchema = z.object({
     isActive: z.boolean(),
 });
 
 const markCompletionBodySchema = z.object({
     participantId: z.string().uuid("Invalid participant id"),
-    activityTypeId: z.string().uuid("Invalid activity type id"),
+    activityId: z.string().uuid("Invalid activity id"),
     note: z.string().max(1000).optional(),
 });
 
 const markCompletionBatchBodySchema = z.object({
     participantIds: z.array(z.string().uuid("Invalid participant id")).min(1).max(500),
-    activityTypeId: z.string().uuid("Invalid activity type id"),
+    activityId: z.string().uuid("Invalid activity id"),
     note: z.string().max(1000).optional(),
 });
 
@@ -74,6 +81,25 @@ const adjustPointsBodySchema = z.object({
         message: "pointsDelta cannot be zero",
     }),
     reason: z.string().max(1000).optional(),
+});
+
+const submitLinkBodySchema = z.object({
+    activityId: z.string().uuid("Invalid activity id"),
+    submissionLink: z.string().url("Invalid submission link"),
+});
+
+const participantDetailParamSchema = z.object({
+    participantId: z.string().uuid("Invalid participant id"),
+});
+
+const pendingSubmissionQuerySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    offset: z.coerce.number().int().min(0).default(0),
+    participantId: z.string().uuid("Invalid participant id").optional(),
+});
+
+const reviewSubmissionBodySchema = z.object({
+    note: z.string().max(1000).optional(),
 });
 
 const auditLogQuerySchema = z.object({
@@ -101,15 +127,20 @@ const activityTypeListQuerySchema = z.object({
 
 module.exports = {
     paginationQuerySchema,
-    activityTypeIdParamSchema,
+    activityIdParamSchema,
+    submissionIdParamSchema,
     completionIdParamSchema,
-    createActivityTypeBodySchema,
-    updateActivityTypeBodySchema,
-    toggleActivityTypeBodySchema,
+    createActivityBodySchema,
+    updateActivityBodySchema,
+    toggleActivityBodySchema,
     markCompletionBodySchema,
     markCompletionBatchBodySchema,
     revokeCompletionBodySchema,
     adjustPointsBodySchema,
+    submitLinkBodySchema,
+    participantDetailParamSchema,
+    pendingSubmissionQuerySchema,
+    reviewSubmissionBodySchema,
     auditLogQuerySchema,
     activityTypeListQuerySchema,
 };

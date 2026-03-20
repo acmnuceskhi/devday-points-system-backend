@@ -1,43 +1,47 @@
 const {
-    listActivityTypes,
-    createActivityType,
-    updateActivityType,
-    toggleActivityType,
+    listActivities,
+    listActivityKinds,
+    createActivity,
+    updateActivity,
+    toggleActivity,
     markActivityCompletion,
     markActivityCompletionBatch,
     revokeActivityCompletion,
     adjustParticipantPoints,
     getAuditLogs,
+    getParticipantAdminDetails,
+    listPendingSubmissions,
+    reviewSubmission,
 } = require("../services/pointsService");
 
 function getActorStaffProfileId(req) {
     return req.staffProfile.id;
 }
 
-async function activityTypes(req, res) {
+async function activities(req, res) {
     const { includeInactive } = req.query;
-    const rows = await listActivityTypes(includeInactive);
+    const rows = await listActivities(includeInactive);
     res.json(rows);
 }
 
-async function createActivity(req, res) {
-    const created = await createActivityType(req.body, getActorStaffProfileId(req));
+async function activityKinds(req, res) {
+    const rows = await listActivityKinds();
+    res.json(rows);
+}
+
+async function create(req, res) {
+    const created = await createActivity(req.body, getActorStaffProfileId(req));
     res.status(201).json(created);
 }
 
-async function updateActivity(req, res) {
-    const updated = await updateActivityType(
-        req.params.activityTypeId,
-        req.body,
-        getActorStaffProfileId(req)
-    );
-
+async function update(req, res) {
+    const updated = await updateActivity(req.params.activityId, req.body, getActorStaffProfileId(req));
     res.json(updated);
 }
 
-async function setActivityStatus(req, res) {
-    const updated = await toggleActivityType(
-        req.params.activityTypeId,
+async function setStatus(req, res) {
+    const updated = await toggleActivity(
+        req.params.activityId,
         req.body.isActive,
         getActorStaffProfileId(req)
     );
@@ -70,6 +74,38 @@ async function adjustPoints(req, res) {
     res.status(201).json(result);
 }
 
+async function participantDetails(req, res) {
+    const result = await getParticipantAdminDetails(req.params.participantId);
+    res.json(result);
+}
+
+async function pendingSubmissions(req, res) {
+    const rows = await listPendingSubmissions(req.query);
+    res.json(rows);
+}
+
+async function approveSubmission(req, res) {
+    const result = await reviewSubmission(
+        req.params.submissionId,
+        "APPROVED",
+        getActorStaffProfileId(req),
+        req.body.note
+    );
+
+    res.json(result);
+}
+
+async function rejectSubmission(req, res) {
+    const result = await reviewSubmission(
+        req.params.submissionId,
+        "REJECTED",
+        getActorStaffProfileId(req),
+        req.body.note
+    );
+
+    res.json(result);
+}
+
 async function auditLogs(req, res) {
     const parsedLimit = Number(req.query.limit);
     const parsedOffset = Number(req.query.offset);
@@ -85,13 +121,18 @@ async function auditLogs(req, res) {
 }
 
 module.exports = {
-    activityTypes,
-    createActivity,
-    updateActivity,
-    setActivityStatus,
+    activities,
+    activityKinds,
+    create,
+    update,
+    setStatus,
     markCompletion,
     markCompletionBatch,
     revokeCompletion,
     adjustPoints,
+    participantDetails,
+    pendingSubmissions,
+    approveSubmission,
+    rejectSubmission,
     auditLogs,
 };

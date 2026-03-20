@@ -24,23 +24,129 @@ async function getMyPointsSummary(participantId) {
 async function getMyActivityProgress(participantId) {
     const data = await prisma.$queryRaw`
         SELECT
-            at.id,
-            at.code,
-            at.name,
-            at.description,
-            at.points,
-            at."isActive",
+            a.id,
+            a.code,
+            a.name,
+            a.description,
+            a.points,
+            a."isActive",
+            at.code AS "activityTypeCode",
+            pac.id AS "completionId",
             pac."completedAt",
             pac.note,
-            CASE WHEN pac.id IS NULL THEN false ELSE true END AS "isCompleted"
-        FROM "ActivityType" at
+            pac."submissionLink" AS "approvedSubmissionLink",
+            CASE WHEN pac.id IS NULL THEN false ELSE true END AS "isCompleted",
+            sub.id AS "submissionId",
+            sub.status AS "submissionStatus",
+            sub."submissionLink" AS "submittedLink",
+            sub."submittedAt"
+        FROM "Activity" a
+        INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
         LEFT JOIN "ParticipantActivityCompletion" pac
-            ON pac."activityTypeId" = at.id
+            ON pac."activityId" = a.id
             AND pac."participantId" = ${participantId}
-        ORDER BY at."isActive" DESC, at.name ASC
+        LEFT JOIN LATERAL (
+            SELECT s.id, s.status, s."submissionLink", s."submittedAt"
+            FROM "ActivitySubmission" s
+            WHERE s."participantId" = ${participantId}
+              AND s."activityId" = a.id
+            ORDER BY s."submittedAt" DESC
+            LIMIT 1
+        ) sub ON TRUE
+        ORDER BY a."isActive" DESC, a.name ASC
     `;
 
     return data;
+}
+
+async function submitMyActivityLink(participantId, input) {
+    return prisma.$transaction(async (tx) => {
+        const activity = (await tx.$queryRaw`
+            SELECT a.id, a.code, a.name, a.points, a."isActive", at.code AS "activityTypeCode"
+            FROM "Activity" a
+            INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
+            WHERE a.id = ${input.activityId}
+            LIMIT 1
+        `)[0];
+
+        if (!activity) {
+            throw new HttpError(404, "Activity not found");
+        }
+
+        if (!activity.isActive) {
+            throw new HttpError(400, "Activity is inactive");
+        }
+
+        if (activity.activityTypeCode !== "LINK_BASED") {
+            throw new HttpError(400, "This activity does not accept link submissions");
+        }
+
+        const completion = (await tx.$queryRaw`
+            SELECT id
+            FROM "ParticipantActivityCompletion"
+            WHERE "participantId" = ${participantId}
+              AND "activityId" = ${input.activityId}
+            LIMIT 1
+        `)[0];
+
+        if (completion) {
+            throw new HttpError(409, "Activity already completed for participant");
+        }
+
+        const existingPending = (await tx.$queryRaw`
+            SELECT id
+            FROM "ActivitySubmission"
+            WHERE "participantId" = ${participantId}
+              AND "activityId" = ${input.activityId}
+              AND status = ${"PENDING"}::"SubmissionStatus"
+            LIMIT 1
+        `)[0];
+
+        let submission;
+        if (existingPending) {
+            submission = (await tx.$queryRaw`
+                UPDATE "ActivitySubmission"
+                SET
+                    "submissionLink" = ${input.submissionLink},
+                    "submittedAt" = NOW(),
+                    "reviewedAt" = NULL,
+                    "reviewedByStaffProfileId" = NULL,
+                    "reviewNote" = NULL
+                WHERE id = ${existingPending.id}
+                RETURNING *
+            `)[0];
+        } else {
+            submission = (await tx.$queryRaw`
+                INSERT INTO "ActivitySubmission"
+                    (id, "participantId", "activityId", "submissionLink", status)
+                VALUES
+                    (${randomUUID()}, ${participantId}, ${input.activityId}, ${input.submissionLink}, ${"PENDING"}::"SubmissionStatus")
+                RETURNING *
+            `)[0];
+        }
+
+        return submission;
+    });
+}
+
+async function getMySubmissions(participantId) {
+    const rows = await prisma.$queryRaw`
+        SELECT
+            s.id,
+            s."activityId",
+            a.name AS "activityName",
+            s."submissionLink",
+            s.status,
+            s."submittedAt",
+            s."reviewedAt",
+            s."reviewNote"
+        FROM "ActivitySubmission" s
+        INNER JOIN "Activity" a ON a.id = s."activityId"
+        WHERE s."participantId" = ${participantId}
+        ORDER BY s."submittedAt" DESC
+    `;
+
+    return rows;
 }
 
 async function getLeaderboard(limit, offset) {
@@ -65,38 +171,83 @@ async function getLeaderboard(limit, offset) {
     return data;
 }
 
-async function listActivityTypes(includeInactive) {
+async function listActivities(includeInactive) {
     const data = includeInactive
         ? await prisma.$queryRaw`
-            SELECT id, code, name, description, points, "isActive", "createdAt", "updatedAt"
-            FROM "ActivityType"
-            ORDER BY "isActive" DESC, name ASC
+            SELECT
+                a.id,
+                a.code,
+                a.name,
+                a.description,
+                a.points,
+                a."isActive",
+                a."createdAt",
+                a."updatedAt",
+                a."activityTypeId",
+                at.code AS "activityTypeCode",
+                at.name AS "activityTypeName"
+            FROM "Activity" a
+            INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
+            ORDER BY a."isActive" DESC, a.name ASC
         `
         : await prisma.$queryRaw`
-            SELECT id, code, name, description, points, "isActive", "createdAt", "updatedAt"
-            FROM "ActivityType"
-            WHERE "isActive" = true
-            ORDER BY name ASC
+            SELECT
+                a.id,
+                a.code,
+                a.name,
+                a.description,
+                a.points,
+                a."isActive",
+                a."createdAt",
+                a."updatedAt",
+                a."activityTypeId",
+                at.code AS "activityTypeCode",
+                at.name AS "activityTypeName"
+            FROM "Activity" a
+            INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
+            WHERE a."isActive" = true
+            ORDER BY a.name ASC
         `;
 
     return data;
 }
 
-async function getActivityTypeById(activityTypeId) {
-    const data = await prisma.$queryRaw`
-        SELECT id, code, name, description, points, "isActive", "createdAt", "updatedAt"
+async function listActivityKinds() {
+    return prisma.$queryRaw`
+        SELECT id, code, name, description, "isActive", "createdAt", "updatedAt"
         FROM "ActivityType"
-        WHERE id = ${activityTypeId}
+        WHERE "isActive" = true
+        ORDER BY name ASC
+    `;
+}
+
+async function getActivityById(activityId) {
+    const data = await prisma.$queryRaw`
+        SELECT
+            a.id,
+            a.code,
+            a.name,
+            a.description,
+            a.points,
+            a."isActive",
+            a."createdAt",
+            a."updatedAt",
+            a."activityTypeId",
+            at.code AS "activityTypeCode",
+            at.name AS "activityTypeName"
+        FROM "Activity" a
+        INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
+        WHERE a.id = ${activityId}
         LIMIT 1
     `;
 
     return data[0] || null;
 }
 
-async function createActivityType(payload, actorStaffProfileId) {
+async function createActivity(payload, actorStaffProfileId) {
     const existing = await prisma.$queryRaw`
         SELECT id
-        FROM "ActivityType"
+        FROM "Activity"
         WHERE code = ${payload.code}
         LIMIT 1
     `;
@@ -105,32 +256,57 @@ async function createActivityType(payload, actorStaffProfileId) {
         throw new HttpError(409, "Activity code already exists");
     }
 
+    const activityType = (await prisma.$queryRaw`
+        SELECT id, code
+        FROM "ActivityType"
+        WHERE id = ${payload.activityTypeId}
+        LIMIT 1
+    `)[0];
+
+    if (!activityType) {
+        throw new HttpError(404, "Activity type not found");
+    }
+
     const id = randomUUID();
     const row = (await prisma.$queryRaw`
-        INSERT INTO "ActivityType"
-            (id, code, name, description, points, "isActive", "createdByStaffProfileId", "updatedByStaffProfileId", "updatedAt")
+        INSERT INTO "Activity"
+            (id, code, name, description, points, "activityTypeId", "isActive", "createdByStaffProfileId", "updatedByStaffProfileId", "updatedAt")
         VALUES
-            (${id}, ${payload.code}, ${payload.name}, ${payload.description || null}, ${payload.points}, ${payload.isActive}, ${actorStaffProfileId}, ${actorStaffProfileId}, NOW())
-        RETURNING id, code, name, description, points, "isActive", "createdAt", "updatedAt"
+            (
+                ${id},
+                ${payload.code},
+                ${payload.name},
+                ${payload.description || null},
+                ${payload.points},
+                ${payload.activityTypeId},
+                ${payload.isActive},
+                ${actorStaffProfileId},
+                ${actorStaffProfileId},
+                NOW()
+            )
+        RETURNING id, code, name, description, points, "activityTypeId", "isActive", "createdAt", "updatedAt"
     `)[0];
 
     await createAuditLog({
         actorStaffProfileId,
         actionType: "ACTIVITY_TYPE_CREATED",
-        targetType: "ActivityType",
+        targetType: "Activity",
         targetId: row.id,
         note: null,
-        payload: row,
+        payload: {
+            ...row,
+            activityTypeCode: activityType.code,
+        },
     });
 
-    return row;
+    return getActivityById(row.id);
 }
 
-async function updateActivityType(activityTypeId, payload, actorStaffProfileId) {
-    const current = await getActivityTypeById(activityTypeId);
+async function updateActivity(activityId, payload, actorStaffProfileId) {
+    const current = await getActivityById(activityId);
 
     if (!current) {
-        throw new HttpError(404, "Activity type not found");
+        throw new HttpError(404, "Activity not found");
     }
 
     const next = {
@@ -138,14 +314,15 @@ async function updateActivityType(activityTypeId, payload, actorStaffProfileId) 
         name: payload.name ?? current.name,
         description: payload.description === undefined ? current.description : payload.description,
         points: payload.points ?? current.points,
+        activityTypeId: payload.activityTypeId ?? current.activityTypeId,
     };
 
     if (next.code !== current.code) {
         const existing = await prisma.$queryRaw`
             SELECT id
-            FROM "ActivityType"
+            FROM "Activity"
             WHERE code = ${next.code}
-              AND id <> ${activityTypeId}
+              AND id <> ${activityId}
             LIMIT 1
         `;
 
@@ -154,163 +331,209 @@ async function updateActivityType(activityTypeId, payload, actorStaffProfileId) 
         }
     }
 
-    const row = (await prisma.$queryRaw`
-        UPDATE "ActivityType"
-        SET
-            code = ${next.code},
-            name = ${next.name},
-            description = ${next.description || null},
-            points = ${next.points},
-            "updatedByStaffProfileId" = ${actorStaffProfileId},
-            "updatedAt" = NOW()
-        WHERE id = ${activityTypeId}
-        RETURNING id, code, name, description, points, "isActive", "createdAt", "updatedAt"
-    `)[0];
-
-    await createAuditLog({
-        actorStaffProfileId,
-        actionType: "ACTIVITY_TYPE_UPDATED",
-        targetType: "ActivityType",
-        targetId: row.id,
-        note: null,
-        payload: {
-            before: current,
-            after: row,
-        },
-    });
-
-    return row;
-}
-
-async function toggleActivityType(activityTypeId, isActive, actorStaffProfileId) {
-    const current = await getActivityTypeById(activityTypeId);
-
-    if (!current) {
-        throw new HttpError(404, "Activity type not found");
-    }
-
-    const row = (await prisma.$queryRaw`
-        UPDATE "ActivityType"
-        SET
-            "isActive" = ${isActive},
-            "updatedByStaffProfileId" = ${actorStaffProfileId},
-            "updatedAt" = NOW()
-        WHERE id = ${activityTypeId}
-        RETURNING id, code, name, description, points, "isActive", "createdAt", "updatedAt"
-    `)[0];
-
-    await createAuditLog({
-        actorStaffProfileId,
-        actionType: "ACTIVITY_TYPE_TOGGLED",
-        targetType: "ActivityType",
-        targetId: row.id,
-        note: null,
-        payload: {
-            before: current.isActive,
-            after: row.isActive,
-        },
-    });
-
-    return row;
-}
-
-async function markActivityCompletion(input, actorStaffProfileId) {
-    return prisma.$transaction(async (tx) => {
-        const participant = (await tx.$queryRaw`
+    if (next.activityTypeId !== current.activityTypeId) {
+        const activityType = (await prisma.$queryRaw`
             SELECT id
-            FROM "Participant"
-            WHERE id = ${input.participantId}
-            LIMIT 1
-        `)[0];
-
-        if (!participant) {
-            throw new HttpError(404, "Participant not found");
-        }
-
-        const activityType = (await tx.$queryRaw`
-            SELECT id, code, name, points, "isActive"
             FROM "ActivityType"
-            WHERE id = ${input.activityTypeId}
+            WHERE id = ${next.activityTypeId}
             LIMIT 1
         `)[0];
 
         if (!activityType) {
             throw new HttpError(404, "Activity type not found");
         }
+    }
 
-        if (!activityType.isActive) {
-            throw new HttpError(400, "Activity type is inactive");
-        }
+    await prisma.$queryRaw`
+        UPDATE "Activity"
+        SET
+            code = ${next.code},
+            name = ${next.name},
+            description = ${next.description || null},
+            points = ${next.points},
+            "activityTypeId" = ${next.activityTypeId},
+            "updatedByStaffProfileId" = ${actorStaffProfileId},
+            "updatedAt" = NOW()
+        WHERE id = ${activityId}
+    `;
 
-        const existingCompletion = (await tx.$queryRaw`
-            SELECT id
-            FROM "ParticipantActivityCompletion"
-            WHERE "participantId" = ${input.participantId}
-              AND "activityTypeId" = ${input.activityTypeId}
-            LIMIT 1
-        `)[0];
+    const updated = await getActivityById(activityId);
 
-        if (existingCompletion) {
-            throw new HttpError(409, "Activity already marked for participant");
-        }
-
-        const completionId = randomUUID();
-
-        const completion = (await tx.$queryRaw`
-            INSERT INTO "ParticipantActivityCompletion"
-                (id, "participantId", "activityTypeId", "markedByStaffProfileId", note)
-            VALUES
-                (${completionId}, ${input.participantId}, ${input.activityTypeId}, ${actorStaffProfileId}, ${input.note || null})
-            RETURNING id, "participantId", "activityTypeId", "completedAt", note
-        `)[0];
-
-        const ledgerId = randomUUID();
-        const metadata = {
-            activityCode: activityType.code,
-            activityName: activityType.name,
-        };
-
-        await tx.$queryRaw`
-            INSERT INTO "PointsLedger"
-                (id, "participantId", "entryType", "pointsDelta", "sourceCompletionId", "actorStaffProfileId", metadata)
-            VALUES
-                (${ledgerId}, ${input.participantId}, ${"MANUAL_ACTIVITY"}::"PointsLedgerEntryType", ${activityType.points}, ${completionId}, ${actorStaffProfileId}, ${metadata}::jsonb)
-        `;
-
-        const summary = (await tx.$queryRaw`
-            INSERT INTO "PointsSummary" ("participantId", "totalPoints", "updatedAt")
-            VALUES (${input.participantId}, ${activityType.points}, NOW())
-            ON CONFLICT ("participantId")
-            DO UPDATE SET
-                "totalPoints" = "PointsSummary"."totalPoints" + EXCLUDED."totalPoints",
-                "updatedAt" = NOW()
-            RETURNING "participantId", "totalPoints", "updatedAt"
-        `)[0];
-
-        await tx.$queryRaw`
-            INSERT INTO "PointsAuditLog"
-                (id, "actorStaffProfileId", "actionType", "targetType", "targetId", note, payload)
-            VALUES
-                (
-                    ${randomUUID()},
-                    ${actorStaffProfileId},
-                    ${"ACTIVITY_COMPLETION_MARKED"}::"PointsAuditActionType",
-                    ${"ParticipantActivityCompletion"},
-                    ${completion.id},
-                    ${input.note || null},
-                    ${JSON.stringify({
-            participantId: input.participantId,
-            activityTypeId: input.activityTypeId,
-            points: activityType.points,
-        })}::jsonb
-                )
-        `;
-
-        return {
-            completion,
-            summary,
-        };
+    await createAuditLog({
+        actorStaffProfileId,
+        actionType: "ACTIVITY_TYPE_UPDATED",
+        targetType: "Activity",
+        targetId: activityId,
+        note: null,
+        payload: {
+            before: current,
+            after: updated,
+        },
     });
+
+    return updated;
+}
+
+async function toggleActivity(activityId, isActive, actorStaffProfileId) {
+    const current = await getActivityById(activityId);
+
+    if (!current) {
+        throw new HttpError(404, "Activity not found");
+    }
+
+    await prisma.$queryRaw`
+        UPDATE "Activity"
+        SET
+            "isActive" = ${isActive},
+            "updatedByStaffProfileId" = ${actorStaffProfileId},
+            "updatedAt" = NOW()
+        WHERE id = ${activityId}
+    `;
+
+    const updated = await getActivityById(activityId);
+
+    await createAuditLog({
+        actorStaffProfileId,
+        actionType: "ACTIVITY_TYPE_TOGGLED",
+        targetType: "Activity",
+        targetId: activityId,
+        note: null,
+        payload: {
+            before: current.isActive,
+            after: updated.isActive,
+        },
+    });
+
+    return updated;
+}
+
+async function grantCompletion(tx, input, actorStaffProfileId) {
+    const participant = (await tx.$queryRaw`
+        SELECT id
+        FROM "Participant"
+        WHERE id = ${input.participantId}
+        LIMIT 1
+    `)[0];
+
+    if (!participant) {
+        throw new HttpError(404, "Participant not found");
+    }
+
+    const activity = (await tx.$queryRaw`
+        SELECT a.id, a.code, a.name, a.points, a."isActive", at.code AS "activityTypeCode"
+        FROM "Activity" a
+        INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
+        WHERE a.id = ${input.activityId}
+        LIMIT 1
+    `)[0];
+
+    if (!activity) {
+        throw new HttpError(404, "Activity not found");
+    }
+
+    if (!activity.isActive) {
+        throw new HttpError(400, "Activity is inactive");
+    }
+
+    if (activity.activityTypeCode === "LINK_BASED" && !input.allowLinkBased) {
+        throw new HttpError(400, "Link-based activities must be approved from submissions");
+    }
+
+    const existingCompletion = (await tx.$queryRaw`
+        SELECT id
+        FROM "ParticipantActivityCompletion"
+        WHERE "participantId" = ${input.participantId}
+          AND "activityId" = ${input.activityId}
+        LIMIT 1
+    `)[0];
+
+    if (existingCompletion) {
+        throw new HttpError(409, "Activity already marked for participant");
+    }
+
+    const completionId = randomUUID();
+
+    const completion = (await tx.$queryRaw`
+        INSERT INTO "ParticipantActivityCompletion"
+            (id, "participantId", "activityId", "markedByStaffProfileId", note, "submissionLink")
+        VALUES
+            (
+                ${completionId},
+                ${input.participantId},
+                ${input.activityId},
+                ${actorStaffProfileId},
+                ${input.note || null},
+                ${input.submissionLink || null}
+            )
+        RETURNING id, "participantId", "activityId", "completedAt", note, "submissionLink"
+    `)[0];
+
+    await tx.$queryRaw`
+        INSERT INTO "PointsLedger"
+            (id, "participantId", "entryType", "pointsDelta", "sourceCompletionId", "actorStaffProfileId", metadata)
+        VALUES
+            (
+                ${randomUUID()},
+                ${input.participantId},
+                ${"MANUAL_ACTIVITY"}::"PointsLedgerEntryType",
+                ${activity.points},
+                ${completionId},
+                ${actorStaffProfileId},
+                ${JSON.stringify({
+        activityCode: activity.code,
+        activityName: activity.name,
+        activityTypeCode: activity.activityTypeCode,
+    })}::jsonb
+            )
+    `;
+
+    const summary = (await tx.$queryRaw`
+        INSERT INTO "PointsSummary" ("participantId", "totalPoints", "updatedAt")
+        VALUES (${input.participantId}, ${activity.points}, NOW())
+        ON CONFLICT ("participantId")
+        DO UPDATE SET
+            "totalPoints" = "PointsSummary"."totalPoints" + EXCLUDED."totalPoints",
+            "updatedAt" = NOW()
+        RETURNING "participantId", "totalPoints", "updatedAt"
+    `)[0];
+
+    await tx.$queryRaw`
+        INSERT INTO "PointsAuditLog"
+            (id, "actorStaffProfileId", "actionType", "targetType", "targetId", note, payload)
+        VALUES
+            (
+                ${randomUUID()},
+                ${actorStaffProfileId},
+                ${"ACTIVITY_COMPLETION_MARKED"}::"PointsAuditActionType",
+                ${"ParticipantActivityCompletion"},
+                ${completion.id},
+                ${input.note || null},
+                ${JSON.stringify({
+        participantId: input.participantId,
+        activityId: input.activityId,
+        points: activity.points,
+        source: input.source || "MANUAL",
+    })}::jsonb
+            )
+    `;
+
+    return { completion, summary, activity };
+}
+
+async function markActivityCompletion(input, actorStaffProfileId) {
+    return prisma.$transaction((tx) =>
+        grantCompletion(
+            tx,
+            {
+                participantId: input.participantId,
+                activityId: input.activityId,
+                note: input.note,
+                source: "MANUAL",
+                allowLinkBased: false,
+            },
+            actorStaffProfileId
+        )
+    );
 }
 
 async function markActivityCompletionBatch(input, actorStaffProfileId) {
@@ -321,7 +544,7 @@ async function markActivityCompletionBatch(input, actorStaffProfileId) {
             const result = await markActivityCompletion(
                 {
                     participantId,
-                    activityTypeId: input.activityTypeId,
+                    activityId: input.activityId,
                     note: input.note,
                 },
                 actorStaffProfileId
@@ -349,17 +572,232 @@ async function markActivityCompletionBatch(input, actorStaffProfileId) {
     };
 }
 
+async function reviewSubmission(submissionId, decision, actorStaffProfileId, note) {
+    return prisma.$transaction(async (tx) => {
+        const submission = (await tx.$queryRaw`
+            SELECT
+                s.id,
+                s."participantId",
+                s."activityId",
+                s."submissionLink",
+                s.status,
+                a.name AS "activityName",
+                a.points
+            FROM "ActivitySubmission" s
+            INNER JOIN "Activity" a ON a.id = s."activityId"
+            WHERE s.id = ${submissionId}
+            LIMIT 1
+        `)[0];
+
+        if (!submission) {
+            throw new HttpError(404, "Submission not found");
+        }
+
+        if (submission.status !== "PENDING") {
+            throw new HttpError(409, "Submission already reviewed");
+        }
+
+        if (decision === "APPROVED") {
+            const completionResult = await grantCompletion(
+                tx,
+                {
+                    participantId: submission.participantId,
+                    activityId: submission.activityId,
+                    note,
+                    source: "LINK_APPROVAL",
+                    allowLinkBased: true,
+                    submissionLink: submission.submissionLink,
+                },
+                actorStaffProfileId
+            );
+
+            await tx.$queryRaw`
+                UPDATE "ActivitySubmission"
+                SET
+                    status = ${"APPROVED"}::"SubmissionStatus",
+                    "reviewedAt" = NOW(),
+                    "reviewedByStaffProfileId" = ${actorStaffProfileId},
+                    "reviewNote" = ${note || null}
+                WHERE id = ${submissionId}
+            `;
+
+            await tx.$queryRaw`
+                INSERT INTO "PointsAuditLog"
+                    (id, "actorStaffProfileId", "actionType", "targetType", "targetId", note, payload)
+                VALUES
+                    (
+                        ${randomUUID()},
+                        ${actorStaffProfileId},
+                        ${"ACTIVITY_SUBMISSION_APPROVED"}::"PointsAuditActionType",
+                        ${"ActivitySubmission"},
+                        ${submissionId},
+                        ${note || null},
+                        ${JSON.stringify({
+                participantId: submission.participantId,
+                activityId: submission.activityId,
+                points: submission.points,
+            })}::jsonb
+                    )
+            `;
+
+            return { submissionId, decision, completion: completionResult.completion, summary: completionResult.summary };
+        }
+
+        await tx.$queryRaw`
+            UPDATE "ActivitySubmission"
+            SET
+                status = ${"REJECTED"}::"SubmissionStatus",
+                "reviewedAt" = NOW(),
+                "reviewedByStaffProfileId" = ${actorStaffProfileId},
+                "reviewNote" = ${note || null}
+            WHERE id = ${submissionId}
+        `;
+
+        await tx.$queryRaw`
+            INSERT INTO "PointsAuditLog"
+                (id, "actorStaffProfileId", "actionType", "targetType", "targetId", note, payload)
+            VALUES
+                (
+                    ${randomUUID()},
+                    ${actorStaffProfileId},
+                    ${"ACTIVITY_SUBMISSION_REJECTED"}::"PointsAuditActionType",
+                    ${"ActivitySubmission"},
+                    ${submissionId},
+                    ${note || null},
+                    ${JSON.stringify({
+            participantId: submission.participantId,
+            activityId: submission.activityId,
+        })}::jsonb
+                )
+        `;
+
+        return { submissionId, decision };
+    });
+}
+
+async function listPendingSubmissions(filters) {
+    const limit = Number.isFinite(Number(filters.limit)) ? Math.trunc(Number(filters.limit)) : 20;
+    const offset = Number.isFinite(Number(filters.offset)) ? Math.trunc(Number(filters.offset)) : 0;
+    const safeLimit = Math.max(1, Math.min(100, limit));
+    const safeOffset = Math.max(0, offset);
+
+    const conditions = [`s.status = 'PENDING'::"SubmissionStatus"`];
+    const values = [];
+
+    if (filters.participantId) {
+        values.push(filters.participantId);
+        conditions.push(`s."participantId" = $${values.length}`);
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const query = `
+        SELECT
+            s.id,
+            s."participantId",
+            p."fullName",
+            p.institution,
+            p.email,
+            p.phone,
+            s."activityId",
+            a.name AS "activityName",
+            a.points,
+            s."submissionLink",
+            s.status,
+            s."submittedAt"
+        FROM "ActivitySubmission" s
+        INNER JOIN "Participant" p ON p.id = s."participantId"
+        INNER JOIN "Activity" a ON a.id = s."activityId"
+        ${whereClause}
+        ORDER BY s."submittedAt" DESC
+        LIMIT ${safeLimit}
+        OFFSET ${safeOffset}
+    `;
+
+    return prisma.$queryRawUnsafe(query, ...values);
+}
+
+async function getParticipantAdminDetails(participantId) {
+    const participant = (await prisma.$queryRaw`
+        SELECT id AS "participantId", "fullName", institution, email, phone
+        FROM "Participant"
+        WHERE id = ${participantId}
+        LIMIT 1
+    `)[0];
+
+    if (!participant) {
+        throw new HttpError(404, "Participant not found");
+    }
+
+    const summary = await getMyPointsSummary(participantId);
+
+    const completions = await prisma.$queryRaw`
+        SELECT
+            pac.id,
+            pac."activityId",
+            a.name AS "activityName",
+            a.code AS "activityCode",
+            a.points,
+            pac."completedAt",
+            pac.note,
+            pac."submissionLink"
+        FROM "ParticipantActivityCompletion" pac
+        INNER JOIN "Activity" a ON a.id = pac."activityId"
+        WHERE pac."participantId" = ${participantId}
+        ORDER BY pac."completedAt" DESC
+    `;
+
+    const pendingSubmissions = await prisma.$queryRaw`
+        SELECT
+            s.id,
+            s."activityId",
+            a.name AS "activityName",
+            a.points,
+            s."submissionLink",
+            s.status,
+            s."submittedAt",
+            s."reviewedAt",
+            s."reviewNote"
+        FROM "ActivitySubmission" s
+        INNER JOIN "Activity" a ON a.id = s."activityId"
+        WHERE s."participantId" = ${participantId}
+          AND s.status = ${"PENDING"}::"SubmissionStatus"
+        ORDER BY s."submittedAt" DESC
+    `;
+
+    const ledger = await prisma.$queryRaw`
+        SELECT
+            id,
+            "entryType",
+            "pointsDelta",
+            metadata,
+            "createdAt"
+        FROM "PointsLedger"
+        WHERE "participantId" = ${participantId}
+        ORDER BY "createdAt" DESC
+        LIMIT 20
+    `;
+
+    return {
+        participant,
+        summary,
+        completions,
+        pendingSubmissions,
+        ledger,
+    };
+}
+
 async function revokeActivityCompletion(completionId, note, actorStaffProfileId) {
     return prisma.$transaction(async (tx) => {
         const completion = (await tx.$queryRaw`
             SELECT
                 pac.id,
                 pac."participantId",
-                pac."activityTypeId",
+                pac."activityId",
                 pac."completedAt",
-                at.points
+                a.points
             FROM "ParticipantActivityCompletion" pac
-            INNER JOIN "ActivityType" at ON at.id = pac."activityTypeId"
+            INNER JOIN "Activity" a ON a.id = pac."activityId"
             WHERE pac.id = ${completionId}
             LIMIT 1
         `)[0];
@@ -401,7 +839,7 @@ async function revokeActivityCompletion(completionId, note, actorStaffProfileId)
                     ${note || null},
                     ${JSON.stringify({
             participantId: completion.participantId,
-            activityTypeId: completion.activityTypeId,
+            activityId: completion.activityId,
             pointsRemoved: completion.points,
         })}::jsonb
                 )
@@ -547,13 +985,19 @@ async function createAuditLog({
 module.exports = {
     getMyPointsSummary,
     getMyActivityProgress,
+    submitMyActivityLink,
+    getMySubmissions,
     getLeaderboard,
-    listActivityTypes,
-    createActivityType,
-    updateActivityType,
-    toggleActivityType,
+    listActivities,
+    listActivityKinds,
+    createActivity,
+    updateActivity,
+    toggleActivity,
     markActivityCompletion,
     markActivityCompletionBatch,
+    reviewSubmission,
+    listPendingSubmissions,
+    getParticipantAdminDetails,
     revokeActivityCompletion,
     adjustParticipantPoints,
     getAuditLogs,
