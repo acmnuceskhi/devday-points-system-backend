@@ -1,18 +1,7 @@
-const express = require('express');
-const app = express();
+const { app } = require("./src/app");
+const { env } = require("./src/config/env");
 
-const PORT = 3000;
-
-// Middleware
-app.use(express.json());
-
-// Routes
-app.get('/', (req, res) => {
-    res.send('Hello, World!');
-});
-
-// Start server
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+app.listen(env.PORT, () => {
+    console.log(`API listening on http://localhost:${env.PORT}`);
 });
 
