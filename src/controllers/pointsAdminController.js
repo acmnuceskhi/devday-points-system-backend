@@ -71,7 +71,16 @@ async function adjustPoints(req, res) {
 }
 
 async function auditLogs(req, res) {
-    const rows = await getAuditLogs(req.query);
+    const parsedLimit = Number(req.query.limit);
+    const parsedOffset = Number(req.query.offset);
+
+    const filters = {
+        ...req.query,
+        limit: Number.isFinite(parsedLimit) ? parsedLimit : 20,
+        offset: Number.isFinite(parsedOffset) ? parsedOffset : 0,
+    };
+
+    const rows = await getAuditLogs(filters);
     res.json(rows);
 }
 

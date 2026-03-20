@@ -1,6 +1,11 @@
 const { prisma, Prisma } = require("../db/prisma");
 
 async function listCompetitions({ activeOnly, limit, offset }) {
+    const safeLimit = Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 20;
+    const safeOffset = Number.isFinite(Number(offset)) ? Math.trunc(Number(offset)) : 0;
+    const limitSql = Prisma.raw(String(Math.max(1, safeLimit)));
+    const offsetSql = Prisma.raw(String(Math.max(0, safeOffset)));
+
     const activeFilter = activeOnly
         ? Prisma.sql`WHERE "isActive" = true`
         : Prisma.empty;
@@ -10,7 +15,8 @@ async function listCompetitions({ activeOnly, limit, offset }) {
         FROM "Competition"
         ${activeFilter}
         ORDER BY "compDay" ASC, name ASC
-        LIMIT ${limit} OFFSET ${offset}
+        LIMIT ${limitSql}
+        OFFSET ${offsetSql}
     `;
 
     if (!competitions.length) {

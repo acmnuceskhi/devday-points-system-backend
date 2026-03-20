@@ -44,6 +44,11 @@ async function getMyActivityProgress(participantId) {
 }
 
 async function getLeaderboard(limit, offset) {
+    const safeLimit = Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 20;
+    const safeOffset = Number.isFinite(Number(offset)) ? Math.trunc(Number(offset)) : 0;
+    const limitSql = Prisma.raw(String(Math.max(1, safeLimit)));
+    const offsetSql = Prisma.raw(String(Math.max(0, safeOffset)));
+
     const data = await prisma.$queryRaw`
         SELECT
             p.id AS "participantId",
@@ -53,8 +58,8 @@ async function getLeaderboard(limit, offset) {
         FROM "Participant" p
         LEFT JOIN "PointsSummary" ps ON ps."participantId" = p.id
         ORDER BY COALESCE(ps."totalPoints", 0) DESC, p."fullName" ASC
-        LIMIT CAST(${limit} AS INTEGER)
-        OFFSET CAST(${offset} AS INTEGER)
+        LIMIT ${limitSql}
+        OFFSET ${offsetSql}
     `;
 
     return data;
@@ -474,21 +479,27 @@ async function adjustParticipantPoints(input, actorStaffProfileId) {
 }
 
 async function getAuditLogs(filters) {
+    const limit = Number.isFinite(Number(filters.limit)) ? Math.trunc(Number(filters.limit)) : 20;
+    const offset = Number.isFinite(Number(filters.offset)) ? Math.trunc(Number(filters.offset)) : 0;
+    const safeLimit = Math.max(1, limit);
+    const safeOffset = Math.max(0, offset);
+
     const conditions = [];
+    const values = [];
 
     if (filters.actionType) {
-        conditions.push(Prisma.sql`pal."actionType" = ${filters.actionType}::"PointsAuditActionType"`);
+        values.push(filters.actionType);
+        conditions.push(`pal."actionType" = $${values.length}::"PointsAuditActionType"`);
     }
 
     if (filters.actorStaffProfileId) {
-        conditions.push(Prisma.sql`pal."actorStaffProfileId" = ${filters.actorStaffProfileId}`);
+        values.push(filters.actorStaffProfileId);
+        conditions.push(`pal."actorStaffProfileId" = $${values.length}`);
     }
 
-    const whereClause = conditions.length
-        ? Prisma.sql`WHERE ${Prisma.join(conditions, Prisma.sql` AND `)}`
-        : Prisma.sql``;
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
-    const query = Prisma.sql`
+    const query = `
         SELECT
             pal.id,
             pal."actorStaffProfileId",
@@ -501,11 +512,11 @@ async function getAuditLogs(filters) {
         FROM "PointsAuditLog" pal
         ${whereClause}
         ORDER BY pal."createdAt" DESC
-        LIMIT ${filters.limit}
-        OFFSET ${filters.offset}
+        LIMIT ${safeLimit}
+        OFFSET ${safeOffset}
     `;
 
-    const data = await prisma.$queryRaw(query);
+    const data = await prisma.$queryRawUnsafe(query, ...values);
     return data;
 }
 
