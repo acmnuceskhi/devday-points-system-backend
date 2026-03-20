@@ -1,6 +1,7 @@
 const { randomUUID } = require("node:crypto");
 const { prisma, Prisma } = require("../db/prisma");
 const { HttpError } = require("../utils/httpError");
+const { getParticipantCompetitions } = require("./participantService");
 
 async function getMyPointsSummary(participantId) {
     const data = await prisma.$queryRaw`
@@ -778,12 +779,15 @@ async function getParticipantAdminDetails(participantId) {
         LIMIT 20
     `;
 
+    const competitions = await getParticipantCompetitions(participantId);
+
     return {
         participant,
         summary,
         completions,
         pendingSubmissions,
         ledger,
+        competitions,
     };
 }
 
