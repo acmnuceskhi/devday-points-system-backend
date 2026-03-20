@@ -1,32 +1,22 @@
-const { supabase } = require("../db/supabase");
-
-function throwDbError(context, error) {
-    throw new Error(`${context}: ${error.message}`);
-}
+const { prisma, Prisma } = require("../db/prisma");
 
 async function getParticipantByUserId(userId) {
-    const { data, error } = await supabase
-        .from("Participant")
-        .select("id, userId, cnic, email, fullName, phone, institution, rollNumber, createdAt, updatedAt")
-        .eq("userId", userId)
-        .limit(1);
-
-    if (error) {
-        throwDbError("Failed to fetch participant profile", error);
-    }
+    const data = await prisma.$queryRaw`
+        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "createdAt", "updatedAt"
+        FROM "Participant"
+        WHERE "userId" = ${userId}
+        LIMIT 1
+    `;
 
     return data[0] || null;
 }
 
 async function getParticipantCompetitions(participantId) {
-    const { data: memberships, error: membershipsError } = await supabase
-        .from("TeamMember")
-        .select("teamId, isLeader, joinedAt")
-        .eq("participantId", participantId);
-
-    if (membershipsError) {
-        throwDbError("Failed to fetch participant team memberships", membershipsError);
-    }
+    const memberships = await prisma.$queryRaw`
+        SELECT "teamId", "isLeader", "joinedAt"
+        FROM "TeamMember"
+        WHERE "participantId" = ${participantId}
+    `;
 
     if (!memberships.length) {
         return [];
@@ -34,42 +24,37 @@ async function getParticipantCompetitions(participantId) {
 
     const teamIds = [...new Set(memberships.map((item) => item.teamId))];
 
-    const { data: teams, error: teamsError } = await supabase
-        .from("Team")
-        .select("id, competitionId, name, paymentStatus")
-        .in("id", teamIds);
-
-    if (teamsError) {
-        throwDbError("Failed to fetch teams", teamsError);
-    }
+    const teams = await prisma.$queryRaw`
+        SELECT id, "competitionId", name, "paymentStatus"
+        FROM "Team"
+        WHERE id IN (${Prisma.join(teamIds)})
+    `;
 
     const competitionIds = [...new Set(teams.map((item) => item.competitionId))];
-    const { data: competitions, error: competitionsError } = await supabase
-        .from("Competition")
-        .select("id, name, compDay, startTime, endTime")
-        .in("id", competitionIds);
+    const competitions = competitionIds.length
+        ? await prisma.$queryRaw`
+            SELECT id, name, "compDay", "startTime", "endTime"
+            FROM "Competition"
+            WHERE id IN (${Prisma.join(competitionIds)})
+        `
+        : [];
 
-    if (competitionsError) {
-        throwDbError("Failed to fetch competitions", competitionsError);
-    }
-
-    const { data: competitionVenues, error: competitionVenuesError } = await supabase
-        .from("_CompetitionToVenue")
-        .select("A, B")
-        .in("A", competitionIds);
-
-    if (competitionVenuesError) {
-        throwDbError("Failed to fetch competition venues", competitionVenuesError);
-    }
+    const competitionVenues = competitionIds.length
+        ? await prisma.$queryRaw`
+            SELECT "A", "B"
+            FROM "_CompetitionToVenue"
+            WHERE "A" IN (${Prisma.join(competitionIds)})
+        `
+        : [];
 
     const venueIds = [...new Set(competitionVenues.map((item) => item.B))];
-    const { data: venues, error: venuesError } = venueIds.length
-        ? await supabase.from("Venue").select("id, name").in("id", venueIds)
-        : { data: [], error: null };
-
-    if (venuesError) {
-        throwDbError("Failed to fetch venues", venuesError);
-    }
+    const venues = venueIds.length
+        ? await prisma.$queryRaw`
+            SELECT id, name
+            FROM "Venue"
+            WHERE id IN (${Prisma.join(venueIds)})
+        `
+        : [];
 
     const teamById = new Map(teams.map((item) => [item.id, item]));
     const competitionById = new Map(competitions.map((item) => [item.id, item]));
@@ -125,30 +110,24 @@ async function getParticipantCompetitions(participantId) {
 }
 
 async function getRankings(limit, offset) {
-    const { data: participants, error: participantsError } = await supabase
-        .from("Participant")
-        .select("id, fullName, institution");
+    const participants = await prisma.$queryRaw`
+        SELECT id, "fullName", institution
+        FROM "Participant"
+    `;
 
-    if (participantsError) {
-        throwDbError("Failed to fetch participants for rankings", participantsError);
-    }
-
-    const { data: memberships, error: membershipsError } = await supabase
-        .from("TeamMember")
-        .select("participantId, teamId");
-
-    if (membershipsError) {
-        throwDbError("Failed to fetch team memberships for rankings", membershipsError);
-    }
+    const memberships = await prisma.$queryRaw`
+        SELECT "participantId", "teamId"
+        FROM "TeamMember"
+    `;
 
     const teamIds = [...new Set(memberships.map((item) => item.teamId))];
-    const { data: teams, error: teamsError } = teamIds.length
-        ? await supabase.from("Team").select("id, competitionId").in("id", teamIds)
-        : { data: [], error: null };
-
-    if (teamsError) {
-        throwDbError("Failed to fetch teams for rankings", teamsError);
-    }
+    const teams = teamIds.length
+        ? await prisma.$queryRaw`
+            SELECT id, "competitionId"
+            FROM "Team"
+            WHERE id IN (${Prisma.join(teamIds)})
+        `
+        : [];
 
     const competitionByTeamId = new Map(teams.map((item) => [item.id, item.competitionId]));
     const membershipByParticipant = new Map();

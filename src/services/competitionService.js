@@ -1,42 +1,28 @@
-const { supabase } = require("../db/supabase");
-
-function throwDbError(context, error) {
-    throw new Error(`${context}: ${error.message}`);
-}
+const { prisma, Prisma } = require("../db/prisma");
 
 async function listCompetitions({ activeOnly, limit, offset }) {
-    let query = supabase
-        .from("Competition")
-        .select(
-            "id, name, description, fee, minTeamSize, maxTeamSize, capacityLimit, compDay, startTime, endTime, isActive, registrationDeadline, earlyBirdFee, earlyBirdLimit, totalSeats"
-        )
-        .order("compDay", { ascending: true })
-        .order("name", { ascending: true })
-        .range(offset, offset + limit - 1);
+    const activeFilter = activeOnly
+        ? Prisma.sql`WHERE "isActive" = true`
+        : Prisma.empty;
 
-    if (activeOnly) {
-        query = query.eq("isActive", true);
-    }
-
-    const { data: competitions, error: competitionsError } = await query;
-
-    if (competitionsError) {
-        throwDbError("Failed to list competitions", competitionsError);
-    }
+    const competitions = await prisma.$queryRaw`
+        SELECT id, name, description, fee, "minTeamSize", "maxTeamSize", "capacityLimit", "compDay", "startTime", "endTime", "isActive", "registrationDeadline", "earlyBirdFee", "earlyBirdLimit", "totalSeats"
+        FROM "Competition"
+        ${activeFilter}
+        ORDER BY "compDay" ASC, name ASC
+        LIMIT ${limit} OFFSET ${offset}
+    `;
 
     if (!competitions.length) {
         return [];
     }
 
     const competitionIds = competitions.map((item) => item.id);
-    const { data: teams, error: teamsError } = await supabase
-        .from("Team")
-        .select("id, competitionId")
-        .in("competitionId", competitionIds);
-
-    if (teamsError) {
-        throwDbError("Failed to fetch competition team counts", teamsError);
-    }
+    const teams = await prisma.$queryRaw`
+        SELECT id, "competitionId"
+        FROM "Team"
+        WHERE "competitionId" IN (${Prisma.join(competitionIds)})
+    `;
 
     const teamCountByCompetition = new Map();
     for (const team of teams) {
@@ -57,31 +43,23 @@ async function listCompetitions({ activeOnly, limit, offset }) {
 }
 
 async function getCompetitionById(competitionId) {
-    const { data: rows, error } = await supabase
-        .from("Competition")
-        .select(
-            "id, name, description, fee, minTeamSize, maxTeamSize, capacityLimit, compDay, startTime, endTime, isActive, registrationDeadline, earlyBirdFee, earlyBirdLimit, totalSeats"
-        )
-        .eq("id", competitionId)
-        .limit(1);
-
-    if (error) {
-        throwDbError("Failed to fetch competition details", error);
-    }
+    const rows = await prisma.$queryRaw`
+        SELECT id, name, description, fee, "minTeamSize", "maxTeamSize", "capacityLimit", "compDay", "startTime", "endTime", "isActive", "registrationDeadline", "earlyBirdFee", "earlyBirdLimit", "totalSeats"
+        FROM "Competition"
+        WHERE id = ${competitionId}
+        LIMIT 1
+    `;
 
     const competition = rows[0] || null;
     if (!competition) {
         return null;
     }
 
-    const { data: teams, error: teamsError } = await supabase
-        .from("Team")
-        .select("id")
-        .eq("competitionId", competitionId);
-
-    if (teamsError) {
-        throwDbError("Failed to fetch competition team counts", teamsError);
-    }
+    const teams = await prisma.$queryRaw`
+        SELECT id
+        FROM "Team"
+        WHERE "competitionId" = ${competitionId}
+    `;
 
     return {
         ...competition,
@@ -93,29 +71,23 @@ async function getCompetitionById(competitionId) {
 }
 
 async function getCompetitionVenues(competitionId) {
-    const { data: links, error: linksError } = await supabase
-        .from("_CompetitionToVenue")
-        .select("A, B")
-        .eq("A", competitionId);
-
-    if (linksError) {
-        throwDbError("Failed to fetch competition venue links", linksError);
-    }
+    const links = await prisma.$queryRaw`
+        SELECT "A", "B"
+        FROM "_CompetitionToVenue"
+        WHERE "A" = ${competitionId}
+    `;
 
     if (!links.length) {
         return [];
     }
 
     const venueIds = [...new Set(links.map((item) => item.B))];
-    const { data: venues, error: venuesError } = await supabase
-        .from("Venue")
-        .select("id, name, location, capacity, facilities")
-        .in("id", venueIds)
-        .order("name", { ascending: true });
-
-    if (venuesError) {
-        throwDbError("Failed to fetch competition venues", venuesError);
-    }
+    const venues = await prisma.$queryRaw`
+        SELECT id, name, location, capacity, facilities
+        FROM "Venue"
+        WHERE id IN (${Prisma.join(venueIds)})
+        ORDER BY name ASC
+    `;
 
     return venues;
 }
