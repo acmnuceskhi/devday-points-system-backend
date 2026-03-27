@@ -5,4 +5,20 @@ const loginBodySchema = z.object({
     password: z.string().default(""),
 });
 
-module.exports = { loginBodySchema };
+const signupRequestBodySchema = z.object({
+    email: z.email("Provide a valid email").transform((value) => value.toLowerCase().trim()),
+});
+
+const signupVerifyBodySchema = z
+    .object({
+        email: z.email("Provide a valid email").transform((value) => value.toLowerCase().trim()),
+        token: z.string().min(32).max(256),
+        password: z.string().min(8).max(72),
+        confirmPassword: z.string().min(8).max(72),
+    })
+    .refine((value) => value.password === value.confirmPassword, {
+        message: "Passwords do not match",
+        path: ["confirmPassword"],
+    });
+
+module.exports = { loginBodySchema, signupRequestBodySchema, signupVerifyBodySchema };

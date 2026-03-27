@@ -20,4 +20,35 @@ const loginLimiter = rateLimit({
     },
 });
 
-module.exports = { apiLimiter, loginLimiter };
+const signupRequestLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 6,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: {
+            message: "Too many signup requests, please try again later.",
+            status: 429,
+        },
+    },
+});
+
+const signupVerifyLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        error: {
+            message: "Too many verification attempts, please try again later.",
+            status: 429,
+        },
+    },
+});
+
+module.exports = {
+    apiLimiter,
+    loginLimiter,
+    signupRequestLimiter,
+    signupVerifyLimiter,
+};

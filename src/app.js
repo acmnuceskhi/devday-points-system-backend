@@ -9,9 +9,40 @@ const { apiRoutes } = require("./routes");
 
 const app = express();
 
+function buildAllowedOrigins(originValue) {
+    const fromEnv = String(originValue || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    const defaults = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+    ];
+
+    return new Set([...defaults, ...fromEnv]);
+}
+
+const allowedOrigins = buildAllowedOrigins(env.FRONTEND_ORIGIN);
+
 app.use(
     cors({
-        origin: env.FRONTEND_ORIGIN,
+        origin(origin, callback) {
+            // Allow same-origin and non-browser clients.
+            if (!origin) {
+                callback(null, true);
+                return;
+            }
+
+            if (allowedOrigins.has(origin)) {
+                callback(null, true);
+                return;
+            }
+
+            callback(new Error("CORS: origin not allowed"));
+        },
         credentials: true,
     })
 );

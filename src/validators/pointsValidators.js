@@ -28,6 +28,7 @@ const createActivityBodySchema = z.object({
     description: z.string().max(1000).optional(),
     points: z.number().int().min(1).max(1000),
     activityTypeId: z.string().uuid("Invalid activity type id"),
+    correctAnswerCanonical: z.string().trim().min(1).max(300).optional(),
     isActive: z.boolean().default(true),
 });
 
@@ -44,6 +45,7 @@ const updateActivityBodySchema = z
         description: z.string().max(1000).nullable().optional(),
         points: z.number().int().min(1).max(1000).optional(),
         activityTypeId: z.string().uuid("Invalid activity type id").optional(),
+        correctAnswerCanonical: z.string().trim().min(1).max(300).nullable().optional(),
     })
     .refine(
         (value) =>
@@ -51,7 +53,8 @@ const updateActivityBodySchema = z
             value.name !== undefined ||
             value.description !== undefined ||
             value.points !== undefined ||
-            value.activityTypeId !== undefined,
+            value.activityTypeId !== undefined ||
+            value.correctAnswerCanonical !== undefined,
         { message: "At least one field is required" }
     );
 
@@ -83,10 +86,20 @@ const adjustPointsBodySchema = z.object({
     reason: z.string().max(1000).optional(),
 });
 
-const submitLinkBodySchema = z.object({
-    activityId: z.string().uuid("Invalid activity id"),
-    submissionLink: z.string().url("Invalid submission link"),
-});
+const submitActivityBodySchema = z
+    .object({
+        activityId: z.string().uuid("Invalid activity id"),
+        submissionLink: z.string().url("Invalid submission link").optional(),
+        submissionText: z.string().trim().min(1).max(300).optional(),
+        answerText: z.string().trim().min(1).max(300).optional(),
+    })
+    .refine(
+        (value) =>
+            Boolean(value.submissionLink) ||
+            Boolean(value.submissionText) ||
+            Boolean(value.answerText),
+        { message: "Provide submissionLink, submissionText, or answerText" }
+    );
 
 const participantDetailParamSchema = z.object({
     participantId: z.string().uuid("Invalid participant id"),
@@ -137,7 +150,7 @@ module.exports = {
     markCompletionBatchBodySchema,
     revokeCompletionBodySchema,
     adjustPointsBodySchema,
-    submitLinkBodySchema,
+    submitActivityBodySchema,
     participantDetailParamSchema,
     pendingSubmissionQuerySchema,
     reviewSubmissionBodySchema,

@@ -14,6 +14,8 @@ const env = {
     JWT_SECRET: process.env.JWT_SECRET || "devday-local-secret",
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "8h",
     FRONTEND_ORIGIN: process.env.FRONTEND_ORIGIN || "http://localhost:5173",
+    SIGNUP_VERIFY_BASE_URL: process.env.SIGNUP_VERIFY_BASE_URL || "",
+    SYSTEM_STAFF_PROFILE_ID: process.env.SYSTEM_STAFF_PROFILE_ID || "",
     ALLOW_EMPTY_PASSWORD_LOGIN:
         (process.env.ALLOW_EMPTY_PASSWORD_LOGIN || "true").toLowerCase() === "true",
 };

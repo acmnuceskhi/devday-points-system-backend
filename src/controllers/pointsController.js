@@ -2,7 +2,7 @@ const {
     getMyPointsSummary,
     getMyActivityProgress,
     getLeaderboard,
-    submitMyActivityLink,
+    submitMyActivity,
     getMySubmissions,
 } = require("../services/pointsService");
 const { HttpError } = require("../utils/httpError");
@@ -38,12 +38,12 @@ async function leaderboard(req, res) {
     });
 }
 
-async function submitMyLink(req, res) {
+async function submitMySubmission(req, res) {
     if (!req.participant) {
         throw new HttpError(404, "Participant profile not found");
     }
 
-    const submission = await submitMyActivityLink(req.participant.id, req.body);
+    const submission = await submitMyActivity(req.participant.id, req.body);
     res.status(201).json(submission);
 }
 
@@ -60,6 +60,6 @@ module.exports = {
     mySummary,
     myActivities,
     leaderboard,
-    submitMyLink,
+    submitMySubmission,
     mySubmissions,
 };

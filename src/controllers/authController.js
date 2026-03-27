@@ -1,4 +1,9 @@
-const { loginParticipant, loginAdmin } = require("../services/authService");
+const {
+    loginParticipant,
+    loginAdmin,
+    requestParticipantSignup,
+    verifyParticipantSignup,
+} = require("../services/authService");
 
 async function login(req, res) {
     const { email, password } = req.body;
@@ -14,4 +19,14 @@ async function adminLogin(req, res) {
     res.json(result);
 }
 
-module.exports = { login, adminLogin };
+async function signupRequest(req, res) {
+    const result = await requestParticipantSignup(req.body.email, req.ip);
+    res.status(200).json(result);
+}
+
+async function signupVerify(req, res) {
+    const result = await verifyParticipantSignup(req.body.email, req.body.token, req.body.password);
+    res.status(200).json(result);
+}
+
+module.exports = { login, adminLogin, signupRequest, signupVerify };

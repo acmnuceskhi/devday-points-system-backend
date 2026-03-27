@@ -36,6 +36,38 @@ async function findParticipantByUserId(userId) {
     return data[0] || null;
 }
 
+async function findParticipantAccountByEmail(email) {
+    const data = await prisma.$queryRaw`
+        SELECT
+            p.id AS "participantId",
+            p.email AS "participantEmail",
+            u.id AS "userId",
+            u.password,
+            u."isActive",
+            u.type
+        FROM "Participant" p
+        LEFT JOIN "User" u ON u.id = p."userId"
+        WHERE lower(p.email) = lower(${email})
+        LIMIT 1
+    `;
+
+    return data[0] || null;
+}
+
+async function updateUserPassword(userId, passwordHash) {
+    const rows = await prisma.$queryRaw`
+        UPDATE "User"
+        SET
+            password = ${passwordHash},
+            "isActive" = true,
+            "updatedAt" = NOW()
+        WHERE id = ${userId}
+        RETURNING id, email, "isActive", type
+    `;
+
+    return rows[0] || null;
+}
+
 async function findStaffProfileByUserId(userId) {
     const data = await prisma.$queryRaw`
         SELECT id, "fullName", "nuId", "isApproved", "staffRole", "assignedBooth"
@@ -63,6 +95,8 @@ module.exports = {
     findUserByEmail,
     findUserById,
     findParticipantByUserId,
+    findParticipantAccountByEmail,
+    updateUserPassword,
     findStaffProfileByUserId,
     logUserAction,
 };

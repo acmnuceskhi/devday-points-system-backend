@@ -1,7 +1,51 @@
 const { randomUUID } = require("node:crypto");
 const { prisma, Prisma } = require("../db/prisma");
+const { env } = require("../config/env");
 const { HttpError } = require("../utils/httpError");
 const { getParticipantCompetitions } = require("./participantService");
+
+const MANUAL_TEXT_CODES = new Set([
+    "MANUAL_TEXT_SUBMISSION",
+    "MANUAL_TEXT",
+    "TEXT_BASED",
+    "MANUAL_SUBMISSION",
+]);
+const SUBMISSION_REQUIRED_CODES = new Set([
+    "LINK_BASED",
+    "MANUAL_TEXT_SUBMISSION",
+    "CORRECT_ANSWER",
+]);
+
+function normalizeAnswerText(value) {
+    return String(value || "")
+        .trim()
+        .replace(/\s+/g, " ")
+        .toLowerCase();
+}
+
+async function resolveAutoReviewerStaffProfileId(tx) {
+    if (env.SYSTEM_STAFF_PROFILE_ID) {
+        return env.SYSTEM_STAFF_PROFILE_ID;
+    }
+
+    const fallback = (await tx.$queryRaw`
+        SELECT id
+        FROM "StaffProfile"
+        WHERE "isApproved" = true
+          AND "staffRole" = ${"SUPERADMIN"}::"StaffRole"
+        ORDER BY "updatedAt" DESC
+        LIMIT 1
+    `)[0];
+
+    if (!fallback?.id) {
+        throw new HttpError(
+            500,
+            "No auto-reviewer available for correct-answer activities. Set SYSTEM_STAFF_PROFILE_ID or ensure an approved SUPERADMIN exists."
+        );
+    }
+
+    return fallback.id;
+}
 
 async function getMyPointsSummary(participantId) {
     const data = await prisma.$queryRaw`
@@ -31,6 +75,7 @@ async function getMyActivityProgress(participantId) {
             a.description,
             a.points,
             a."isActive",
+            a."correctAnswerCanonical" IS NOT NULL AS "hasCorrectAnswer",
             at.code AS "activityTypeCode",
             pac.id AS "completionId",
             pac."completedAt",
@@ -40,6 +85,7 @@ async function getMyActivityProgress(participantId) {
             sub.id AS "submissionId",
             sub.status AS "submissionStatus",
             sub."submissionLink" AS "submittedLink",
+            sub."submissionText" AS "submittedText",
             sub."submittedAt"
         FROM "Activity" a
         INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
@@ -47,7 +93,7 @@ async function getMyActivityProgress(participantId) {
             ON pac."activityId" = a.id
             AND pac."participantId" = ${participantId}
         LEFT JOIN LATERAL (
-            SELECT s.id, s.status, s."submissionLink", s."submittedAt"
+            SELECT s.id, s.status, s."submissionLink", s."submissionText", s."submittedAt"
             FROM "ActivitySubmission" s
             WHERE s."participantId" = ${participantId}
               AND s."activityId" = a.id
@@ -60,10 +106,17 @@ async function getMyActivityProgress(participantId) {
     return data;
 }
 
-async function submitMyActivityLink(participantId, input) {
+async function submitMyActivity(participantId, input) {
     return prisma.$transaction(async (tx) => {
         const activity = (await tx.$queryRaw`
-            SELECT a.id, a.code, a.name, a.points, a."isActive", at.code AS "activityTypeCode"
+            SELECT
+                a.id,
+                a.code,
+                a.name,
+                a.points,
+                a."isActive",
+                a."correctAnswerCanonical",
+                at.code AS "activityTypeCode"
             FROM "Activity" a
             INNER JOIN "ActivityType" at ON at.id = a."activityTypeId"
             WHERE a.id = ${input.activityId}
@@ -78,10 +131,6 @@ async function submitMyActivityLink(participantId, input) {
             throw new HttpError(400, "Activity is inactive");
         }
 
-        if (activity.activityTypeCode !== "LINK_BASED") {
-            throw new HttpError(400, "This activity does not accept link submissions");
-        }
-
         const completion = (await tx.$queryRaw`
             SELECT id
             FROM "ParticipantActivityCompletion"
@@ -94,39 +143,151 @@ async function submitMyActivityLink(participantId, input) {
             throw new HttpError(409, "Activity already completed for participant");
         }
 
-        const existingPending = (await tx.$queryRaw`
-            SELECT id
-            FROM "ActivitySubmission"
-            WHERE "participantId" = ${participantId}
-              AND "activityId" = ${input.activityId}
-              AND status = ${"PENDING"}::"SubmissionStatus"
-            LIMIT 1
-        `)[0];
+        if (activity.activityTypeCode === "LINK_BASED") {
+            if (!input.submissionLink) {
+                throw new HttpError(400, "submissionLink is required for link-based activities");
+            }
 
-        let submission;
-        if (existingPending) {
-            submission = (await tx.$queryRaw`
-                UPDATE "ActivitySubmission"
-                SET
-                    "submissionLink" = ${input.submissionLink},
-                    "submittedAt" = NOW(),
-                    "reviewedAt" = NULL,
-                    "reviewedByStaffProfileId" = NULL,
-                    "reviewNote" = NULL
-                WHERE id = ${existingPending.id}
-                RETURNING *
+            const existingPending = (await tx.$queryRaw`
+                SELECT id
+                FROM "ActivitySubmission"
+                WHERE "participantId" = ${participantId}
+                  AND "activityId" = ${input.activityId}
+                  AND status = ${"PENDING"}::"SubmissionStatus"
+                LIMIT 1
             `)[0];
-        } else {
-            submission = (await tx.$queryRaw`
-                INSERT INTO "ActivitySubmission"
-                    (id, "participantId", "activityId", "submissionLink", status)
-                VALUES
-                    (${randomUUID()}, ${participantId}, ${input.activityId}, ${input.submissionLink}, ${"PENDING"}::"SubmissionStatus")
-                RETURNING *
-            `)[0];
+
+            let submission;
+            if (existingPending) {
+                submission = (await tx.$queryRaw`
+                    UPDATE "ActivitySubmission"
+                    SET
+                        "submissionLink" = ${input.submissionLink},
+                        "submissionText" = NULL,
+                        "submittedAt" = NOW(),
+                        "reviewedAt" = NULL,
+                        "reviewedByStaffProfileId" = NULL,
+                        "reviewNote" = NULL
+                    WHERE id = ${existingPending.id}
+                    RETURNING *
+                `)[0];
+            } else {
+                submission = (await tx.$queryRaw`
+                    INSERT INTO "ActivitySubmission"
+                        (id, "participantId", "activityId", "submissionLink", status)
+                    VALUES
+                        (${randomUUID()}, ${participantId}, ${input.activityId}, ${input.submissionLink}, ${"PENDING"}::"SubmissionStatus")
+                    RETURNING *
+                `)[0];
+            }
+
+            return submission;
         }
 
-        return submission;
+        if (MANUAL_TEXT_CODES.has(activity.activityTypeCode)) {
+            if (!input.submissionText) {
+                throw new HttpError(400, "submissionText is required for text-based manual activities");
+            }
+
+            const existingPending = (await tx.$queryRaw`
+                SELECT id
+                FROM "ActivitySubmission"
+                WHERE "participantId" = ${participantId}
+                  AND "activityId" = ${input.activityId}
+                  AND status = ${"PENDING"}::"SubmissionStatus"
+                LIMIT 1
+            `)[0];
+
+            let submission;
+            if (existingPending) {
+                submission = (await tx.$queryRaw`
+                    UPDATE "ActivitySubmission"
+                    SET
+                        "submissionLink" = NULL,
+                        "submissionText" = ${input.submissionText},
+                        "submittedAt" = NOW(),
+                        "reviewedAt" = NULL,
+                        "reviewedByStaffProfileId" = NULL,
+                        "reviewNote" = NULL
+                    WHERE id = ${existingPending.id}
+                    RETURNING *
+                `)[0];
+            } else {
+                submission = (await tx.$queryRaw`
+                    INSERT INTO "ActivitySubmission"
+                        (id, "participantId", "activityId", "submissionText", status)
+                    VALUES
+                        (${randomUUID()}, ${participantId}, ${input.activityId}, ${input.submissionText}, ${"PENDING"}::"SubmissionStatus")
+                    RETURNING *
+                `)[0];
+            }
+
+            return submission;
+        }
+
+        if (activity.activityTypeCode !== "CORRECT_ANSWER") {
+            throw new HttpError(400, "This activity does not accept participant submissions");
+        }
+
+        if (!input.answerText) {
+            throw new HttpError(400, "answerText is required for correct-answer activities");
+        }
+
+        if (!activity.correctAnswerCanonical) {
+            throw new HttpError(400, "Correct answer is not configured for this activity");
+        }
+
+        const autoReviewerStaffProfileId = await resolveAutoReviewerStaffProfileId(tx);
+
+        const normalizedAnswer = normalizeAnswerText(input.answerText);
+        const normalizedCanonical = normalizeAnswerText(activity.correctAnswerCanonical);
+        const isCorrect = normalizedAnswer === normalizedCanonical;
+
+        const submission = (await tx.$queryRaw`
+            INSERT INTO "ActivitySubmission"
+                (id, "participantId", "activityId", "submissionText", status, "reviewedAt", "reviewedByStaffProfileId", "reviewNote")
+            VALUES
+                (
+                    ${randomUUID()},
+                    ${participantId},
+                    ${input.activityId},
+                    ${input.answerText},
+                    ${isCorrect ? "APPROVED" : "REJECTED"}::"SubmissionStatus",
+                    NOW(),
+                    ${autoReviewerStaffProfileId},
+                    ${isCorrect ? "Auto-checked: correct answer" : "Auto-checked: incorrect answer"}
+                )
+            RETURNING *
+        `)[0];
+
+        if (!isCorrect) {
+            return {
+                ...submission,
+                autoEvaluated: true,
+                isCorrect: false,
+            };
+        }
+
+        const completionResult = await grantCompletion(
+            tx,
+            {
+                participantId,
+                activityId: input.activityId,
+                note: "Auto-approved from correct answer",
+                source: "CORRECT_ANSWER",
+                allowLinkBased: true,
+                submissionLink: null,
+            },
+            autoReviewerStaffProfileId
+        );
+
+        return {
+            ...submission,
+            autoEvaluated: true,
+            isCorrect: true,
+            completion: completionResult.completion,
+            summary: completionResult.summary,
+        };
     });
 }
 
@@ -137,6 +298,7 @@ async function getMySubmissions(participantId) {
             s."activityId",
             a.name AS "activityName",
             s."submissionLink",
+            s."submissionText",
             s.status,
             s."submittedAt",
             s."reviewedAt",
@@ -181,6 +343,7 @@ async function listActivities(includeInactive) {
                 a.name,
                 a.description,
                 a.points,
+                a."correctAnswerCanonical",
                 a."isActive",
                 a."createdAt",
                 a."updatedAt",
@@ -198,6 +361,7 @@ async function listActivities(includeInactive) {
                 a.name,
                 a.description,
                 a.points,
+                a."correctAnswerCanonical",
                 a."isActive",
                 a."createdAt",
                 a."updatedAt",
@@ -230,6 +394,7 @@ async function getActivityById(activityId) {
             a.name,
             a.description,
             a.points,
+            a."correctAnswerCanonical",
             a."isActive",
             a."createdAt",
             a."updatedAt",
@@ -268,10 +433,18 @@ async function createActivity(payload, actorStaffProfileId) {
         throw new HttpError(404, "Activity type not found");
     }
 
+    if (activityType.code === "CORRECT_ANSWER" && !payload.correctAnswerCanonical) {
+        throw new HttpError(400, "correctAnswerCanonical is required for CORRECT_ANSWER activities");
+    }
+
+    if (activityType.code !== "CORRECT_ANSWER" && payload.correctAnswerCanonical) {
+        throw new HttpError(400, "correctAnswerCanonical can only be used with CORRECT_ANSWER activities");
+    }
+
     const id = randomUUID();
     const row = (await prisma.$queryRaw`
         INSERT INTO "Activity"
-            (id, code, name, description, points, "activityTypeId", "isActive", "createdByStaffProfileId", "updatedByStaffProfileId", "updatedAt")
+            (id, code, name, description, points, "activityTypeId", "correctAnswerCanonical", "isActive", "createdByStaffProfileId", "updatedByStaffProfileId", "updatedAt")
         VALUES
             (
                 ${id},
@@ -280,12 +453,13 @@ async function createActivity(payload, actorStaffProfileId) {
                 ${payload.description || null},
                 ${payload.points},
                 ${payload.activityTypeId},
+                ${payload.correctAnswerCanonical || null},
                 ${payload.isActive},
                 ${actorStaffProfileId},
                 ${actorStaffProfileId},
                 NOW()
             )
-        RETURNING id, code, name, description, points, "activityTypeId", "isActive", "createdAt", "updatedAt"
+        RETURNING id, code, name, description, points, "activityTypeId", "correctAnswerCanonical", "isActive", "createdAt", "updatedAt"
     `)[0];
 
     await createAuditLog({
@@ -316,6 +490,10 @@ async function updateActivity(activityId, payload, actorStaffProfileId) {
         description: payload.description === undefined ? current.description : payload.description,
         points: payload.points ?? current.points,
         activityTypeId: payload.activityTypeId ?? current.activityTypeId,
+        correctAnswerCanonical:
+            payload.correctAnswerCanonical === undefined
+                ? current.correctAnswerCanonical
+                : payload.correctAnswerCanonical,
     };
 
     if (next.code !== current.code) {
@@ -332,17 +510,23 @@ async function updateActivity(activityId, payload, actorStaffProfileId) {
         }
     }
 
-    if (next.activityTypeId !== current.activityTypeId) {
-        const activityType = (await prisma.$queryRaw`
-            SELECT id
+    const targetActivityType = (await prisma.$queryRaw`
+            SELECT id, code
             FROM "ActivityType"
             WHERE id = ${next.activityTypeId}
             LIMIT 1
         `)[0];
 
-        if (!activityType) {
+    if (!targetActivityType) {
             throw new HttpError(404, "Activity type not found");
-        }
+    }
+
+    if (targetActivityType.code === "CORRECT_ANSWER" && !next.correctAnswerCanonical) {
+        throw new HttpError(400, "correctAnswerCanonical is required for CORRECT_ANSWER activities");
+    }
+
+    if (targetActivityType.code !== "CORRECT_ANSWER") {
+        next.correctAnswerCanonical = null;
     }
 
     await prisma.$queryRaw`
@@ -353,6 +537,7 @@ async function updateActivity(activityId, payload, actorStaffProfileId) {
             description = ${next.description || null},
             points = ${next.points},
             "activityTypeId" = ${next.activityTypeId},
+            "correctAnswerCanonical" = ${next.correctAnswerCanonical || null},
             "updatedByStaffProfileId" = ${actorStaffProfileId},
             "updatedAt" = NOW()
         WHERE id = ${activityId}
@@ -436,8 +621,8 @@ async function grantCompletion(tx, input, actorStaffProfileId) {
         throw new HttpError(400, "Activity is inactive");
     }
 
-    if (activity.activityTypeCode === "LINK_BASED" && !input.allowLinkBased) {
-        throw new HttpError(400, "Link-based activities must be approved from submissions");
+    if (SUBMISSION_REQUIRED_CODES.has(activity.activityTypeCode) && !input.allowLinkBased) {
+        throw new HttpError(400, "This activity type must be completed via participant submission review");
     }
 
     const existingCompletion = (await tx.$queryRaw`
@@ -581,6 +766,7 @@ async function reviewSubmission(submissionId, decision, actorStaffProfileId, not
                 s."participantId",
                 s."activityId",
                 s."submissionLink",
+                s."submissionText",
                 s.status,
                 a.name AS "activityName",
                 a.points
@@ -704,6 +890,7 @@ async function listPendingSubmissions(filters) {
             a.name AS "activityName",
             a.points,
             s."submissionLink",
+            s."submissionText",
             s.status,
             s."submittedAt"
         FROM "ActivitySubmission" s
@@ -755,6 +942,7 @@ async function getParticipantAdminDetails(participantId) {
             a.name AS "activityName",
             a.points,
             s."submissionLink",
+            s."submissionText",
             s.status,
             s."submittedAt",
             s."reviewedAt",
@@ -989,7 +1177,7 @@ async function createAuditLog({
 module.exports = {
     getMyPointsSummary,
     getMyActivityProgress,
-    submitMyActivityLink,
+    submitMyActivity,
     getMySubmissions,
     getLeaderboard,
     listActivities,
