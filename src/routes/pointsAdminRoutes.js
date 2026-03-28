@@ -11,6 +11,7 @@ const {
     adjustPoints,
     participantDetails,
     pendingSubmissions,
+    submissionsByActivity,
     approveSubmission,
     rejectSubmission,
     auditLogs,
@@ -32,6 +33,7 @@ const {
     auditLogQuerySchema,
     participantDetailParamSchema,
     pendingSubmissionQuerySchema,
+    activitySubmissionsQuerySchema,
     submissionIdParamSchema,
     reviewSubmissionBodySchema,
 } = require("../validators/pointsValidators");
@@ -96,6 +98,11 @@ router.get(
     "/submissions/pending",
     validate(pendingSubmissionQuerySchema, "query"),
     asyncHandler(pendingSubmissions)
+);
+router.get(
+    "/submissions/by-activity",
+    validate(activitySubmissionsQuerySchema, "query"),
+    asyncHandler(submissionsByActivity)
 );
 router.post(
     "/submissions/:submissionId/approve",

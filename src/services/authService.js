@@ -30,7 +30,7 @@ function hashOtpToken(token) {
 }
 
 function buildSignupLink(email, token) {
-    const base = env.SIGNUP_VERIFY_BASE_URL || `${env.FRONTEND_ORIGIN}/login`;
+    const base = env.SIGNUP_VERIFY_BASE_URL || `${env.FRONTEND_ORIGIN}/signup/verify`;
     const separator = base.includes("?") ? "&" : "?";
     return `${base}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
 }
@@ -165,13 +165,16 @@ async function loginAdmin(email, inputPassword) {
 
 async function requestParticipantSignup(email, requestedIp) {
     const normalizedEmail = normalizeEmail(email);
+    console.log(`[signup][request] email=${normalizedEmail} ip=${requestedIp || "unknown"}`);
     const participantAccount = await findParticipantAccountByEmail(normalizedEmail);
 
     if (participantAccount && participantAccount.userId && participantAccount.password) {
+        console.log(`[signup][request] blocked-existing-account email=${normalizedEmail}`);
         throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
     }
 
     if (!participantAccount || !participantAccount.userId) {
+        console.log(`[signup][request] ineligible-email email=${normalizedEmail}`);
         // Keep unknown and ineligible paths non-specific.
         return {
             message: "If this email is eligible for signup, a verification link has been created.",
@@ -190,6 +193,7 @@ async function requestParticipantSignup(email, requestedIp) {
         const createdAtMs = new Date(latestToken.createdAt).getTime();
         const elapsedSeconds = Math.floor((Date.now() - createdAtMs) / 1000);
         if (elapsedSeconds < OTP_RESEND_COOLDOWN_SECONDS) {
+            console.log(`[signup][request] cooldown-hit email=${normalizedEmail} wait=${OTP_RESEND_COOLDOWN_SECONDS - elapsedSeconds}s`);
             throw new HttpError(
                 429,
                 `Please wait ${OTP_RESEND_COOLDOWN_SECONDS - elapsedSeconds}s before requesting another signup link`
@@ -220,6 +224,8 @@ async function requestParticipantSignup(email, requestedIp) {
     });
 
     const signupLink = buildSignupLink(normalizedEmail, token);
+    console.log(`[signup][request] otp-generated email=${normalizedEmail} token=${token}`);
+    console.log(`[signup][request] verify-link=${signupLink}`);
 
     return {
         message: "Signup verification link created.",
@@ -231,6 +237,7 @@ async function requestParticipantSignup(email, requestedIp) {
 async function verifyParticipantSignup(email, token, password) {
     const normalizedEmail = normalizeEmail(email);
     const tokenHash = hashOtpToken(token);
+    console.log(`[signup][verify] email=${normalizedEmail} tokenPrefix=${String(token).slice(0, 8)}`);
 
     const otp = (await prisma.$queryRaw`
         SELECT id, email, "expiresAt", "consumedAt"
@@ -241,20 +248,24 @@ async function verifyParticipantSignup(email, token, password) {
     `)[0];
 
     if (!otp || otp.consumedAt) {
+        console.log(`[signup][verify] invalid-or-used-token email=${normalizedEmail}`);
         throw new HttpError(400, "Invalid or already used signup token");
     }
 
     if (new Date(otp.expiresAt).getTime() < Date.now()) {
+        console.log(`[signup][verify] expired-token email=${normalizedEmail}`);
         throw new HttpError(400, "Signup token expired");
     }
 
     const participantAccount = await findParticipantAccountByEmail(normalizedEmail);
 
     if (!participantAccount || !participantAccount.userId) {
+        console.log(`[signup][verify] ineligible-email email=${normalizedEmail}`);
         throw new HttpError(403, "This email is not eligible for participant signup");
     }
 
     if (participantAccount.password) {
+        console.log(`[signup][verify] already-has-password email=${normalizedEmail}`);
         throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
     }
 
@@ -290,6 +301,7 @@ async function verifyParticipantSignup(email, token, password) {
     }
 
     await logUserAction(participantAccount.userId, "LOGIN");
+    console.log(`[signup][verify] success email=${normalizedEmail} userId=${participantAccount.userId}`);
 
     const accessToken = signAccessToken({
         userId: participantAccount.userId,

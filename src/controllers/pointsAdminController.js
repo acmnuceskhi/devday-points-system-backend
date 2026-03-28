@@ -11,6 +11,7 @@ const {
     getAuditLogs,
     getParticipantAdminDetails,
     listPendingSubmissions,
+    listSubmissionsByActivity,
     reviewSubmission,
 } = require("../services/pointsService");
 
@@ -84,6 +85,11 @@ async function pendingSubmissions(req, res) {
     res.json(rows);
 }
 
+async function submissionsByActivity(req, res) {
+    const rows = await listSubmissionsByActivity(req.query);
+    res.json(rows);
+}
+
 async function approveSubmission(req, res) {
     const result = await reviewSubmission(
         req.params.submissionId,
@@ -132,6 +138,7 @@ module.exports = {
     adjustPoints,
     participantDetails,
     pendingSubmissions,
+    submissionsByActivity,
     approveSubmission,
     rejectSubmission,
     auditLogs,

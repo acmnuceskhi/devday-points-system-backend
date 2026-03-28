@@ -23,7 +23,8 @@ const createActivityBodySchema = z.object({
         .min(2)
         .max(50)
         .regex(/^[A-Z0-9_]+$/, "Code must contain uppercase letters, numbers, or underscore")
-        .transform((value) => value.trim()),
+        .transform((value) => value.trim())
+        .optional(),
     name: z.string().min(2).max(100).transform((value) => value.trim()),
     description: z.string().max(1000).optional(),
     points: z.number().int().min(1).max(1000),
@@ -111,6 +112,13 @@ const pendingSubmissionQuerySchema = z.object({
     participantId: z.string().uuid("Invalid participant id").optional(),
 });
 
+const activitySubmissionsQuerySchema = z.object({
+    activityId: z.string().uuid("Invalid activity id"),
+    limit: z.coerce.number().int().min(1).max(100).default(30),
+    offset: z.coerce.number().int().min(0).default(0),
+    status: z.enum(["PENDING", "APPROVED", "REJECTED"]).optional(),
+});
+
 const reviewSubmissionBodySchema = z.object({
     note: z.string().max(1000).optional(),
 });
@@ -153,6 +161,7 @@ module.exports = {
     submitActivityBodySchema,
     participantDetailParamSchema,
     pendingSubmissionQuerySchema,
+    activitySubmissionsQuerySchema,
     reviewSubmissionBodySchema,
     auditLogQuerySchema,
     activityTypeListQuerySchema,

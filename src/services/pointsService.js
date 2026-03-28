@@ -23,6 +23,36 @@ function normalizeAnswerText(value) {
         .toLowerCase();
 }
 
+function makeActivityCodeFromName(name) {
+    return String(name || "")
+        .trim()
+        .replace(/\s+/g, "_")
+        .replace(/[^A-Za-z0-9_]/g, "")
+        .replace(/_+/g, "_")
+        .replace(/^_+|_+$/g, "")
+        .toUpperCase();
+}
+
+async function resolveUniqueActivityCode(baseCode) {
+    const fallbackBase = baseCode || "ACTIVITY";
+
+    for (let suffix = 0; suffix < 1000; suffix += 1) {
+        const candidate = suffix === 0 ? fallbackBase : `${fallbackBase}_${suffix + 1}`;
+        const existing = await prisma.$queryRaw`
+            SELECT id
+            FROM "Activity"
+            WHERE code = ${candidate}
+            LIMIT 1
+        `;
+
+        if (!existing[0]) {
+            return candidate;
+        }
+    }
+
+    throw new HttpError(500, "Unable to generate unique activity code");
+}
+
 async function resolveAutoReviewerStaffProfileId(tx) {
     if (env.SYSTEM_STAFF_PROFILE_ID) {
         return env.SYSTEM_STAFF_PROFILE_ID;
@@ -411,16 +441,13 @@ async function getActivityById(activityId) {
 }
 
 async function createActivity(payload, actorStaffProfileId) {
-    const existing = await prisma.$queryRaw`
-        SELECT id
-        FROM "Activity"
-        WHERE code = ${payload.code}
-        LIMIT 1
-    `;
+    const desiredCode = payload.code || makeActivityCodeFromName(payload.name);
 
-    if (existing[0]) {
-        throw new HttpError(409, "Activity code already exists");
+    if (!desiredCode) {
+        throw new HttpError(400, "Activity name is required to generate a code");
     }
+
+    const resolvedCode = await resolveUniqueActivityCode(desiredCode);
 
     const activityType = (await prisma.$queryRaw`
         SELECT id, code
@@ -448,7 +475,7 @@ async function createActivity(payload, actorStaffProfileId) {
         VALUES
             (
                 ${id},
-                ${payload.code},
+                ${resolvedCode},
                 ${payload.name},
                 ${payload.description || null},
                 ${payload.points},
@@ -905,6 +932,51 @@ async function listPendingSubmissions(filters) {
     return prisma.$queryRawUnsafe(query, ...values);
 }
 
+async function listSubmissionsByActivity(filters) {
+    const limit = Number.isFinite(Number(filters.limit)) ? Math.trunc(Number(filters.limit)) : 30;
+    const offset = Number.isFinite(Number(filters.offset)) ? Math.trunc(Number(filters.offset)) : 0;
+    const safeLimit = Math.max(1, Math.min(100, limit));
+    const safeOffset = Math.max(0, offset);
+
+    const conditions = [`s."activityId" = $1`];
+    const values = [filters.activityId];
+
+    if (filters.status) {
+        values.push(filters.status);
+        conditions.push(`s.status = $${values.length}::"SubmissionStatus"`);
+    }
+
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
+
+    const query = `
+        SELECT
+            s.id,
+            s."participantId",
+            p."fullName",
+            p.institution,
+            p.email,
+            p.phone,
+            s."activityId",
+            a.name AS "activityName",
+            a.points,
+            s."submissionLink",
+            s."submissionText",
+            s.status,
+            s."submittedAt",
+            s."reviewedAt",
+            s."reviewNote"
+        FROM "ActivitySubmission" s
+        INNER JOIN "Participant" p ON p.id = s."participantId"
+        INNER JOIN "Activity" a ON a.id = s."activityId"
+        ${whereClause}
+        ORDER BY s."submittedAt" DESC
+        LIMIT ${safeLimit}
+        OFFSET ${safeOffset}
+    `;
+
+    return prisma.$queryRawUnsafe(query, ...values);
+}
+
 async function getParticipantAdminDetails(participantId) {
     const participant = (await prisma.$queryRaw`
         SELECT id AS "participantId", "fullName", institution, email, phone
@@ -1189,6 +1261,7 @@ module.exports = {
     markActivityCompletionBatch,
     reviewSubmission,
     listPendingSubmissions,
+    listSubmissionsByActivity,
     getParticipantAdminDetails,
     revokeActivityCompletion,
     adjustParticipantPoints,
