@@ -36,6 +36,17 @@ async function findParticipantByUserId(userId) {
     return data[0] || null;
 }
 
+async function findParticipantByEmail(email) {
+    const data = await prisma.$queryRaw`
+        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "createdAt", "updatedAt"
+        FROM "Participant"
+        WHERE lower(email) = lower(${email})
+        LIMIT 1
+    `;
+
+    return data[0] || null;
+}
+
 async function findParticipantAccountByEmail(email) {
     const data = await prisma.$queryRaw`
         SELECT
@@ -48,6 +59,17 @@ async function findParticipantAccountByEmail(email) {
         FROM "Participant" p
         LEFT JOIN "User" u ON u.id = p."userId"
         WHERE lower(p.email) = lower(${email})
+        LIMIT 1
+    `;
+
+    return data[0] || null;
+}
+
+async function findUserByEmailInsensitive(email) {
+    const data = await prisma.$queryRaw`
+        SELECT id, email, password, "isActive", type
+        FROM "User"
+        WHERE lower(email) = lower(${email})
         LIMIT 1
     `;
 
@@ -93,8 +115,10 @@ async function logUserAction(userId, action) {
 
 module.exports = {
     findUserByEmail,
+    findUserByEmailInsensitive,
     findUserById,
     findParticipantByUserId,
+    findParticipantByEmail,
     findParticipantAccountByEmail,
     updateUserPassword,
     findStaffProfileByUserId,

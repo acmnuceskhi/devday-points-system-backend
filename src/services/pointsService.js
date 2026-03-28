@@ -15,6 +15,7 @@ const SUBMISSION_REQUIRED_CODES = new Set([
     "MANUAL_TEXT_SUBMISSION",
     "CORRECT_ANSWER",
 ]);
+const COMPETITION_ACTIVITY_POINTS_KEY = "COMPETITION_ACTIVITY_POINTS";
 
 function normalizeAnswerText(value) {
     return String(value || "")
@@ -977,6 +978,83 @@ async function listSubmissionsByActivity(filters) {
     return prisma.$queryRawUnsafe(query, ...values);
 }
 
+async function getCompetitionActivityPointsConfig() {
+    const globalRow = (await prisma.$queryRaw`
+        SELECT "valueText"
+        FROM "MasterConfig"
+        WHERE key = ${COMPETITION_ACTIVITY_POINTS_KEY}
+        LIMIT 1
+    `)[0];
+
+    const overrides = await prisma.$queryRaw`
+        SELECT
+            cc."competitionId",
+            c.name AS "competitionName",
+            cc."valueText"
+        FROM "CompetitionConfig" cc
+        INNER JOIN "Competition" c ON c.id = cc."competitionId"
+        WHERE cc.key = ${COMPETITION_ACTIVITY_POINTS_KEY}
+        ORDER BY c.name ASC
+    `;
+
+    return {
+        key: COMPETITION_ACTIVITY_POINTS_KEY,
+        globalDefaultPoints: globalRow?.valueText ? Number(globalRow.valueText) : null,
+        overrides: overrides.map((item) => ({
+            competitionId: item.competitionId,
+            competitionName: item.competitionName,
+            points: item.valueText ? Number(item.valueText) : null,
+        })),
+    };
+}
+
+async function setCompetitionActivityPointsDefault(points) {
+    await prisma.$queryRaw`
+        INSERT INTO "MasterConfig" (id, key, "valueText", "createdAt", "updatedAt")
+        VALUES (${randomUUID()}, ${COMPETITION_ACTIVITY_POINTS_KEY}, ${String(points)}, NOW(), NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET
+            "valueText" = EXCLUDED."valueText",
+            "updatedAt" = NOW()
+    `;
+
+    return getCompetitionActivityPointsConfig();
+}
+
+async function setCompetitionActivityPointsOverride(competitionId, points) {
+    const exists = (await prisma.$queryRaw`
+        SELECT id
+        FROM "Competition"
+        WHERE id = ${competitionId}
+        LIMIT 1
+    `)[0];
+
+    if (!exists) {
+        throw new HttpError(404, "Competition not found");
+    }
+
+    await prisma.$queryRaw`
+        INSERT INTO "CompetitionConfig" (id, "competitionId", key, "valueText", "createdAt", "updatedAt")
+        VALUES (${randomUUID()}, ${competitionId}, ${COMPETITION_ACTIVITY_POINTS_KEY}, ${String(points)}, NOW(), NOW())
+        ON CONFLICT ("competitionId", key)
+        DO UPDATE SET
+            "valueText" = EXCLUDED."valueText",
+            "updatedAt" = NOW()
+    `;
+
+    return getCompetitionActivityPointsConfig();
+}
+
+async function clearCompetitionActivityPointsOverride(competitionId) {
+    await prisma.$queryRaw`
+        DELETE FROM "CompetitionConfig"
+        WHERE "competitionId" = ${competitionId}
+          AND key = ${COMPETITION_ACTIVITY_POINTS_KEY}
+    `;
+
+    return getCompetitionActivityPointsConfig();
+}
+
 async function getParticipantAdminDetails(participantId) {
     const participant = (await prisma.$queryRaw`
         SELECT id AS "participantId", "fullName", institution, email, phone
@@ -1262,6 +1340,10 @@ module.exports = {
     reviewSubmission,
     listPendingSubmissions,
     listSubmissionsByActivity,
+    getCompetitionActivityPointsConfig,
+    setCompetitionActivityPointsDefault,
+    setCompetitionActivityPointsOverride,
+    clearCompetitionActivityPointsOverride,
     getParticipantAdminDetails,
     revokeActivityCompletion,
     adjustParticipantPoints,

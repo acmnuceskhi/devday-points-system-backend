@@ -7,6 +7,7 @@ const loginBodySchema = z.object({
 
 const signupRequestBodySchema = z.object({
     email: z.email("Provide a valid email").transform((value) => value.toLowerCase().trim()),
+    fullName: z.string().trim().min(2).max(100),
 });
 
 const signupVerifyBodySchema = z

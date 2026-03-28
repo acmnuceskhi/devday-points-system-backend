@@ -12,6 +12,10 @@ const {
     participantDetails,
     pendingSubmissions,
     submissionsByActivity,
+    competitionActivityPointsConfig,
+    updateCompetitionActivityPointsDefault,
+    updateCompetitionActivityPointsOverride,
+    deleteCompetitionActivityPointsOverride,
     approveSubmission,
     rejectSubmission,
     auditLogs,
@@ -32,10 +36,13 @@ const {
     adjustPointsBodySchema,
     auditLogQuerySchema,
     participantDetailParamSchema,
+    competitionIdParamSchema,
     pendingSubmissionQuerySchema,
     activitySubmissionsQuerySchema,
     submissionIdParamSchema,
     reviewSubmissionBodySchema,
+    competitionActivityPointsDefaultBodySchema,
+    competitionActivityPointsOverrideBodySchema,
 } = require("../validators/pointsValidators");
 
 const router = express.Router();
@@ -103,6 +110,26 @@ router.get(
     "/submissions/by-activity",
     validate(activitySubmissionsQuerySchema, "query"),
     asyncHandler(submissionsByActivity)
+);
+router.get(
+    "/config/competition-activity-points",
+    asyncHandler(competitionActivityPointsConfig)
+);
+router.patch(
+    "/config/competition-activity-points/default",
+    validate(competitionActivityPointsDefaultBodySchema),
+    asyncHandler(updateCompetitionActivityPointsDefault)
+);
+router.put(
+    "/config/competition-activity-points/overrides/:competitionId",
+    validate(competitionIdParamSchema, "params"),
+    validate(competitionActivityPointsOverrideBodySchema),
+    asyncHandler(updateCompetitionActivityPointsOverride)
+);
+router.delete(
+    "/config/competition-activity-points/overrides/:competitionId",
+    validate(competitionIdParamSchema, "params"),
+    asyncHandler(deleteCompetitionActivityPointsOverride)
 );
 router.post(
     "/submissions/:submissionId/approve",

@@ -20,7 +20,7 @@ async function adminLogin(req, res) {
 }
 
 async function signupRequest(req, res) {
-    const result = await requestParticipantSignup(req.body.email, req.ip);
+    const result = await requestParticipantSignup(req.body.email, req.body.fullName, req.ip);
     res.status(200).json(result);
 }
 

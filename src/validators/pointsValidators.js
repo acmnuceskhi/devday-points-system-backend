@@ -106,6 +106,10 @@ const participantDetailParamSchema = z.object({
     participantId: z.string().uuid("Invalid participant id"),
 });
 
+const competitionIdParamSchema = z.object({
+    competitionId: z.string().uuid("Invalid competition id"),
+});
+
 const pendingSubmissionQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(20),
     offset: z.coerce.number().int().min(0).default(0),
@@ -121,6 +125,14 @@ const activitySubmissionsQuerySchema = z.object({
 
 const reviewSubmissionBodySchema = z.object({
     note: z.string().max(1000).optional(),
+});
+
+const competitionActivityPointsDefaultBodySchema = z.object({
+    points: z.number().int().min(0).max(1000),
+});
+
+const competitionActivityPointsOverrideBodySchema = z.object({
+    points: z.number().int().min(0).max(1000),
 });
 
 const auditLogQuerySchema = z.object({
@@ -160,9 +172,12 @@ module.exports = {
     adjustPointsBodySchema,
     submitActivityBodySchema,
     participantDetailParamSchema,
+    competitionIdParamSchema,
     pendingSubmissionQuerySchema,
     activitySubmissionsQuerySchema,
     reviewSubmissionBodySchema,
+    competitionActivityPointsDefaultBodySchema,
+    competitionActivityPointsOverrideBodySchema,
     auditLogQuerySchema,
     activityTypeListQuerySchema,
 };

@@ -12,6 +12,10 @@ const {
     getParticipantAdminDetails,
     listPendingSubmissions,
     listSubmissionsByActivity,
+    getCompetitionActivityPointsConfig,
+    setCompetitionActivityPointsDefault,
+    setCompetitionActivityPointsOverride,
+    clearCompetitionActivityPointsOverride,
     reviewSubmission,
 } = require("../services/pointsService");
 
@@ -90,6 +94,26 @@ async function submissionsByActivity(req, res) {
     res.json(rows);
 }
 
+async function competitionActivityPointsConfig(req, res) {
+    const config = await getCompetitionActivityPointsConfig();
+    res.json(config);
+}
+
+async function updateCompetitionActivityPointsDefault(req, res) {
+    const config = await setCompetitionActivityPointsDefault(req.body.points);
+    res.json(config);
+}
+
+async function updateCompetitionActivityPointsOverride(req, res) {
+    const config = await setCompetitionActivityPointsOverride(req.params.competitionId, req.body.points);
+    res.json(config);
+}
+
+async function deleteCompetitionActivityPointsOverride(req, res) {
+    const config = await clearCompetitionActivityPointsOverride(req.params.competitionId);
+    res.json(config);
+}
+
 async function approveSubmission(req, res) {
     const result = await reviewSubmission(
         req.params.submissionId,
@@ -139,6 +163,10 @@ module.exports = {
     participantDetails,
     pendingSubmissions,
     submissionsByActivity,
+    competitionActivityPointsConfig,
+    updateCompetitionActivityPointsDefault,
+    updateCompetitionActivityPointsOverride,
+    deleteCompetitionActivityPointsOverride,
     approveSubmission,
     rejectSubmission,
     auditLogs,

@@ -6,6 +6,7 @@ const { HttpError } = require("../utils/httpError");
 const { signAccessToken } = require("../utils/jwt");
 const {
     findUserByEmail,
+    findUserByEmailInsensitive,
     findParticipantByUserId,
     findParticipantAccountByEmail,
     findStaffProfileByUserId,
@@ -163,22 +164,28 @@ async function loginAdmin(email, inputPassword) {
     };
 }
 
-async function requestParticipantSignup(email, requestedIp) {
+async function requestParticipantSignup(email, fullName, requestedIp) {
     const normalizedEmail = normalizeEmail(email);
+    const normalizedFullName = String(fullName || "").trim();
     console.log(`[signup][request] email=${normalizedEmail} ip=${requestedIp || "unknown"}`);
-    const participantAccount = await findParticipantAccountByEmail(normalizedEmail);
 
-    if (participantAccount && participantAccount.userId && participantAccount.password) {
-        console.log(`[signup][request] blocked-existing-account email=${normalizedEmail}`);
-        throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
+    if (!normalizedFullName) {
+        throw new HttpError(400, "Full name is required");
     }
 
-    if (!participantAccount || !participantAccount.userId) {
-        console.log(`[signup][request] ineligible-email email=${normalizedEmail}`);
-        // Keep unknown and ineligible paths non-specific.
-        return {
-            message: "If this email is eligible for signup, a verification link has been created.",
-        };
+    const participantAccount = await findParticipantAccountByEmail(normalizedEmail);
+    const existingUser = await findUserByEmailInsensitive(normalizedEmail);
+
+    if (existingUser && existingUser.type !== "PARTICIPANT") {
+        throw new HttpError(409, "This email is already associated with a non-participant account");
+    }
+
+    if (
+        (participantAccount && participantAccount.userId && participantAccount.password) ||
+        (!participantAccount && existingUser && existingUser.password)
+    ) {
+        console.log(`[signup][request] blocked-existing-account email=${normalizedEmail}`);
+        throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
     }
 
     const latestToken = (await prisma.$queryRaw`
@@ -217,9 +224,9 @@ async function requestParticipantSignup(email, requestedIp) {
 
         await tx.$queryRaw`
             INSERT INTO "SignupOtpLink"
-                (id, email, "tokenHash", "expiresAt", "requestedIp")
+                (id, email, "fullName", "tokenHash", "expiresAt", "requestedIp")
             VALUES
-                (${randomUUID()}, ${normalizedEmail}, ${tokenHash}, ${expiresAt}, ${requestedIp || null})
+                (${randomUUID()}, ${normalizedEmail}, ${normalizedFullName}, ${tokenHash}, ${expiresAt}, ${requestedIp || null})
         `;
     });
 
@@ -229,6 +236,7 @@ async function requestParticipantSignup(email, requestedIp) {
 
     return {
         message: "Signup verification link created.",
+        hint: "If you already registered for a competition, use that same email so your scores stay in one place.",
         signupLink,
         expiresInMinutes: OTP_TTL_MINUTES,
     };
@@ -240,7 +248,7 @@ async function verifyParticipantSignup(email, token, password) {
     console.log(`[signup][verify] email=${normalizedEmail} tokenPrefix=${String(token).slice(0, 8)}`);
 
     const otp = (await prisma.$queryRaw`
-        SELECT id, email, "expiresAt", "consumedAt"
+                SELECT id, email, "fullName", "expiresAt", "consumedAt"
         FROM "SignupOtpLink"
         WHERE lower(email) = lower(${normalizedEmail})
           AND "tokenHash" = ${tokenHash}
@@ -258,18 +266,23 @@ async function verifyParticipantSignup(email, token, password) {
     }
 
     const participantAccount = await findParticipantAccountByEmail(normalizedEmail);
+    const existingUser = await findUserByEmailInsensitive(normalizedEmail);
 
-    if (!participantAccount || !participantAccount.userId) {
-        console.log(`[signup][verify] ineligible-email email=${normalizedEmail}`);
-        throw new HttpError(403, "This email is not eligible for participant signup");
-    }
-
-    if (participantAccount.password) {
+    if (
+        (participantAccount && participantAccount.password) ||
+        (!participantAccount && existingUser && existingUser.password)
+    ) {
         console.log(`[signup][verify] already-has-password email=${normalizedEmail}`);
         throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
     }
 
+    if (existingUser && existingUser.type !== "PARTICIPANT") {
+        throw new HttpError(409, "This email is already associated with a non-participant account");
+    }
+
     const passwordHash = await bcrypt.hash(password, 12);
+
+    let resolvedUserId = participantAccount?.userId || existingUser?.id || null;
 
     await prisma.$transaction(async (tx) => {
         await tx.$queryRaw`
@@ -280,31 +293,73 @@ async function verifyParticipantSignup(email, token, password) {
             WHERE id = ${otp.id}
         `;
 
-        const rows = await tx.$queryRaw`
-            UPDATE "User"
-            SET
-                password = ${passwordHash},
-                "isActive" = true,
-                "updatedAt" = NOW()
-            WHERE id = ${participantAccount.userId}
-            RETURNING id
-        `;
-        const updated = rows[0] || null;
-        if (!updated) {
-            throw new HttpError(404, "Participant account not found");
+        if (!resolvedUserId) {
+            const createdUser = (await tx.$queryRaw`
+                INSERT INTO "User"
+                    (id, email, password, "isActive", type, "createdAt", "updatedAt")
+                VALUES
+                    (${randomUUID()}, ${normalizedEmail}, ${passwordHash}, true, ${"PARTICIPANT"}::"UserType", NOW(), NOW())
+                RETURNING id
+            `)[0];
+
+            resolvedUserId = createdUser.id;
+        } else {
+            await tx.$queryRaw`
+                UPDATE "User"
+                SET
+                    password = ${passwordHash},
+                    "isActive" = true,
+                    "updatedAt" = NOW()
+                WHERE id = ${resolvedUserId}
+            `;
+        }
+
+        const participantByEmail = (await tx.$queryRaw`
+            SELECT id, "userId"
+            FROM "Participant"
+            WHERE lower(email) = lower(${normalizedEmail})
+            LIMIT 1
+        `)[0];
+
+        if (participantByEmail) {
+            if (participantByEmail.userId !== resolvedUserId) {
+                await tx.$queryRaw`
+                    UPDATE "Participant"
+                    SET
+                        "userId" = ${resolvedUserId},
+                        "fullName" = ${String(otp.fullName || "").trim() || "Participant"},
+                        "updatedAt" = NOW()
+                    WHERE id = ${participantByEmail.id}
+                `;
+            }
+        } else {
+            await tx.$queryRaw`
+                INSERT INTO "Participant"
+                    (id, "userId", cnic, email, "fullName", "createdAt", "updatedAt")
+                VALUES
+                    (
+                        ${randomUUID()},
+                        ${resolvedUserId},
+                        NULL,
+                        ${normalizedEmail},
+                        ${String(otp.fullName || "").trim() || "Participant"},
+                        NOW(),
+                        NOW()
+                    )
+            `;
         }
     });
 
-    const participant = await findParticipantByUserId(participantAccount.userId);
+    const participant = await findParticipantByUserId(resolvedUserId);
     if (!participant) {
         throw new HttpError(404, "No participant profile found");
     }
 
-    await logUserAction(participantAccount.userId, "LOGIN");
-    console.log(`[signup][verify] success email=${normalizedEmail} userId=${participantAccount.userId}`);
+    await logUserAction(resolvedUserId, "LOGIN");
+    console.log(`[signup][verify] success email=${normalizedEmail} userId=${resolvedUserId}`);
 
     const accessToken = signAccessToken({
-        userId: participantAccount.userId,
+        userId: resolvedUserId,
         email: normalizedEmail,
         type: "PARTICIPANT",
         participantId: participant.id,
@@ -314,7 +369,7 @@ async function verifyParticipantSignup(email, token, password) {
         message: "Signup completed successfully.",
         accessToken,
         user: {
-            id: participantAccount.userId,
+            id: resolvedUserId,
             email: normalizedEmail,
             type: "PARTICIPANT",
         },
