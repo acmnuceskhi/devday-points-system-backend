@@ -546,7 +546,7 @@ async function updateActivity(activityId, payload, actorStaffProfileId) {
         `)[0];
 
     if (!targetActivityType) {
-            throw new HttpError(404, "Activity type not found");
+        throw new HttpError(404, "Activity type not found");
     }
 
     if (targetActivityType.code === "CORRECT_ANSWER" && !next.correctAnswerCanonical) {
@@ -978,6 +978,31 @@ async function listSubmissionsByActivity(filters) {
     return prisma.$queryRawUnsafe(query, ...values);
 }
 
+async function getLatestSubmissionForParticipantActivity(participantId, activityId) {
+    const row = (await prisma.$queryRaw`
+        SELECT
+            s.id,
+            s."participantId",
+            s."activityId",
+            a.name AS "activityName",
+            a.points,
+            s."submissionLink",
+            s."submissionText",
+            s.status,
+            s."submittedAt",
+            s."reviewedAt",
+            s."reviewNote"
+        FROM "ActivitySubmission" s
+        INNER JOIN "Activity" a ON a.id = s."activityId"
+        WHERE s."participantId" = ${participantId}
+          AND s."activityId" = ${activityId}
+        ORDER BY s."submittedAt" DESC
+        LIMIT 1
+    `)[0] || null;
+
+    return row;
+}
+
 async function getCompetitionActivityPointsConfig() {
     const globalRow = (await prisma.$queryRaw`
         SELECT "valueText"
@@ -1340,6 +1365,7 @@ module.exports = {
     reviewSubmission,
     listPendingSubmissions,
     listSubmissionsByActivity,
+    getLatestSubmissionForParticipantActivity,
     getCompetitionActivityPointsConfig,
     setCompetitionActivityPointsDefault,
     setCompetitionActivityPointsOverride,

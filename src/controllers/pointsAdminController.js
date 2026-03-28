@@ -12,6 +12,7 @@ const {
     getParticipantAdminDetails,
     listPendingSubmissions,
     listSubmissionsByActivity,
+    getLatestSubmissionForParticipantActivity,
     getCompetitionActivityPointsConfig,
     setCompetitionActivityPointsDefault,
     setCompetitionActivityPointsOverride,
@@ -94,6 +95,14 @@ async function submissionsByActivity(req, res) {
     res.json(rows);
 }
 
+async function latestParticipantActivitySubmission(req, res) {
+    const result = await getLatestSubmissionForParticipantActivity(
+        req.params.participantId,
+        req.params.activityId
+    );
+    res.json(result);
+}
+
 async function competitionActivityPointsConfig(req, res) {
     const config = await getCompetitionActivityPointsConfig();
     res.json(config);
@@ -163,6 +172,7 @@ module.exports = {
     participantDetails,
     pendingSubmissions,
     submissionsByActivity,
+    latestParticipantActivitySubmission,
     competitionActivityPointsConfig,
     updateCompetitionActivityPointsDefault,
     updateCompetitionActivityPointsOverride,

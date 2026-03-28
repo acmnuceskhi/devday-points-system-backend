@@ -106,6 +106,11 @@ const participantDetailParamSchema = z.object({
     participantId: z.string().uuid("Invalid participant id"),
 });
 
+const participantActivitySubmissionParamSchema = z.object({
+    participantId: z.string().uuid("Invalid participant id"),
+    activityId: z.string().uuid("Invalid activity id"),
+});
+
 const competitionIdParamSchema = z.object({
     competitionId: z.string().uuid("Invalid competition id"),
 });
@@ -172,6 +177,7 @@ module.exports = {
     adjustPointsBodySchema,
     submitActivityBodySchema,
     participantDetailParamSchema,
+    participantActivitySubmissionParamSchema,
     competitionIdParamSchema,
     pendingSubmissionQuerySchema,
     activitySubmissionsQuerySchema,

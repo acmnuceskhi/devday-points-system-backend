@@ -4,6 +4,7 @@ const { prisma } = require("../db/prisma");
 const { env } = require("../config/env");
 const { HttpError } = require("../utils/httpError");
 const { signAccessToken } = require("../utils/jwt");
+const { sendSignupOtpEmail } = require("./mailerService");
 const {
     findUserByEmail,
     findUserByEmailInsensitive,
@@ -15,6 +16,7 @@ const {
 
 const OTP_TTL_MINUTES = 15;
 const OTP_RESEND_COOLDOWN_SECONDS = 60;
+const PARTICIPANT_ALREADY_REGISTERED_CODE = "PARTICIPANT_ALREADY_REGISTERED";
 const EXISTING_PARTICIPANT_SIGNUP_MESSAGE =
     "You already have a registered account, likely because you registered for a competition. Your password has already been emailed to you. Please login.";
 
@@ -185,7 +187,12 @@ async function requestParticipantSignup(email, fullName, requestedIp) {
         (!participantAccount && existingUser && existingUser.password)
     ) {
         console.log(`[signup][request] blocked-existing-account email=${normalizedEmail}`);
-        throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
+        throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE, {
+            code: PARTICIPANT_ALREADY_REGISTERED_CODE,
+            details: {
+                loginPath: "/login",
+            },
+        });
     }
 
     const latestToken = (await prisma.$queryRaw`
@@ -231,13 +238,30 @@ async function requestParticipantSignup(email, fullName, requestedIp) {
     });
 
     const signupLink = buildSignupLink(normalizedEmail, token);
-    console.log(`[signup][request] otp-generated email=${normalizedEmail} token=${token}`);
-    console.log(`[signup][request] verify-link=${signupLink}`);
+    const emailResult = await sendSignupOtpEmail({
+        toEmail: normalizedEmail,
+        fullName: normalizedFullName,
+        signupLink,
+        expiresInMinutes: OTP_TTL_MINUTES,
+    });
+
+    if (!emailResult.delivered) {
+        console.error(
+            `[signup][request] email-delivery-failed email=${normalizedEmail} reason=${emailResult.reason || "UNKNOWN"}`
+        );
+        throw new HttpError(500, "Signup email service is not configured. Please contact support.", {
+            code: "SIGNUP_EMAIL_NOT_CONFIGURED",
+        });
+    }
+
+    if (env.NODE_ENV !== "production") {
+        console.log(`[signup][request] verify-link=${signupLink}`);
+    }
 
     return {
-        message: "Signup verification link created.",
+        message: "Signup verification link has been sent to your email.",
         hint: "If you already registered for a competition, use that same email so your scores stay in one place.",
-        signupLink,
+        signupLink: env.NODE_ENV === "production" ? undefined : signupLink,
         expiresInMinutes: OTP_TTL_MINUTES,
     };
 }
@@ -273,7 +297,12 @@ async function verifyParticipantSignup(email, token, password) {
         (!participantAccount && existingUser && existingUser.password)
     ) {
         console.log(`[signup][verify] already-has-password email=${normalizedEmail}`);
-        throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE);
+        throw new HttpError(409, EXISTING_PARTICIPANT_SIGNUP_MESSAGE, {
+            code: PARTICIPANT_ALREADY_REGISTERED_CODE,
+            details: {
+                loginPath: "/login",
+            },
+        });
     }
 
     if (existingUser && existingUser.type !== "PARTICIPANT") {

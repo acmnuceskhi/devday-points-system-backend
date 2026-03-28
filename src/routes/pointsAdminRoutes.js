@@ -12,6 +12,7 @@ const {
     participantDetails,
     pendingSubmissions,
     submissionsByActivity,
+    latestParticipantActivitySubmission,
     competitionActivityPointsConfig,
     updateCompetitionActivityPointsDefault,
     updateCompetitionActivityPointsOverride,
@@ -36,6 +37,7 @@ const {
     adjustPointsBodySchema,
     auditLogQuerySchema,
     participantDetailParamSchema,
+    participantActivitySubmissionParamSchema,
     competitionIdParamSchema,
     pendingSubmissionQuerySchema,
     activitySubmissionsQuerySchema,
@@ -110,6 +112,11 @@ router.get(
     "/submissions/by-activity",
     validate(activitySubmissionsQuerySchema, "query"),
     asyncHandler(submissionsByActivity)
+);
+router.get(
+    "/participants/:participantId/activities/:activityId/submission-latest",
+    validate(participantActivitySubmissionParamSchema, "params"),
+    asyncHandler(latestParticipantActivitySubmission)
 );
 router.get(
     "/config/competition-activity-points",
