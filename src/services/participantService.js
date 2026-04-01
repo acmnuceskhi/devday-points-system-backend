@@ -2,7 +2,7 @@ const { prisma, Prisma } = require("../db/prisma");
 
 async function getParticipantByUserId(userId) {
     const data = await prisma.$queryRaw`
-        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "createdAt", "updatedAt"
+        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "minigameCode", "createdAt", "updatedAt"
         FROM "Participant"
         WHERE "userId" = ${userId}
         LIMIT 1
@@ -83,6 +83,12 @@ async function getParticipantCompetitions(participantId) {
             const firstVenue = (venueByCompetitionId.get(team.competitionId) || []).find(
                 Boolean
             );
+            const competitionVenues = (venueByCompetitionId.get(team.competitionId) || [])
+                .filter(Boolean)
+                .map((venue) => ({
+                    id: venue.id,
+                    name: venue.name,
+                }));
 
             return {
                 teamId: membership.teamId,
@@ -97,6 +103,7 @@ async function getParticipantCompetitions(participantId) {
                 endTime: competition.endTime,
                 venueId: firstVenue ? firstVenue.id : null,
                 venueName: firstVenue ? firstVenue.name : null,
+                venues: competitionVenues,
             };
         })
         .filter(Boolean)
