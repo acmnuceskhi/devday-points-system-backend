@@ -231,9 +231,9 @@ async function requestParticipantSignup(email, fullName, requestedIp) {
 
         await tx.$queryRaw`
             INSERT INTO "SignupOtpLink"
-                (id, email, "fullName", "tokenHash", "expiresAt", "requestedIp")
+                (id, email, "fullName", "tokenHash", "expiresAt", "requestedIp", "createdAt", "updatedAt")
             VALUES
-                (${randomUUID()}, ${normalizedEmail}, ${normalizedFullName}, ${tokenHash}, ${expiresAt}, ${requestedIp || null})
+                (${randomUUID()}, ${normalizedEmail}, ${normalizedFullName}, ${tokenHash}, ${expiresAt}, ${requestedIp || null}, NOW(), NOW())
         `;
     });
 
