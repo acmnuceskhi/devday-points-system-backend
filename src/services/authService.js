@@ -18,7 +18,7 @@ const OTP_TTL_MINUTES = 15;
 const OTP_RESEND_COOLDOWN_SECONDS = 60;
 const PARTICIPANT_ALREADY_REGISTERED_CODE = "PARTICIPANT_ALREADY_REGISTERED";
 const EXISTING_PARTICIPANT_SIGNUP_MESSAGE =
-    "You already have a registered account, likely because you registered for a competition. Your password has already been emailed to you. Please login.";
+    "You already have a registered account, likely because you registered for a competition. Your password has already been emailed to you. Use that to log in.";
 
 function isBcryptHash(value) {
     return /^\$2[aby]\$\d{2}\$/.test(value);
