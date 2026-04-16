@@ -1,9 +1,10 @@
 const nodemailer = require("nodemailer");
+const { resolve4 } = require("dns").promises;
 const { env } = require("../config/env");
 
 let transporter = null;
 
-function getTransporter() {
+async function getTransporter() {
     if (transporter) {
         return transporter;
     }
@@ -12,8 +13,18 @@ function getTransporter() {
         return null;
     }
 
+    // Resolve to an IPv4 address explicitly — Railway containers have no IPv6
+    // routing, so letting nodemailer do its own DNS lookup risks ENETUNREACH.
+    let host = env.SMTP_HOST;
+    try {
+        const [ipv4] = await resolve4(host);
+        host = ipv4;
+    } catch {
+        // hostname unchanged if resolve fails; connection will likely fail too
+    }
+
     transporter = nodemailer.createTransport({
-        host: env.SMTP_HOST,
+        host,
         // port: env.SMTP_PORT,
         // secure: env.SMTP_SECURE,
         auth: {
@@ -27,7 +38,7 @@ function getTransporter() {
 }
 
 async function sendSignupOtpEmail({ toEmail, fullName, signupLink, expiresInMinutes }) {
-    const mailTransporter = getTransporter();
+    const mailTransporter = await getTransporter();
     if (!mailTransporter) {
         return {
             delivered: false,
