@@ -31,6 +31,9 @@ async function getTransporter() {
             user: env.SMTP_USER,
             pass: env.SMTP_PASS,
         },
+        // Required when host is a resolved IP: TLS must validate against the
+        // original hostname, not the IP address.
+        tls: { servername: env.SMTP_HOST },
         connectionTimeout: 15000,
     });
 
