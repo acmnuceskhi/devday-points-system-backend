@@ -4,6 +4,7 @@ const { env } = require("../config/env");
 let transporter = null;
 
 function getTransporter() {
+    // return null; // email disabled — no SMTP available on this Railway plan
     if (transporter) {
         return transporter;
     }
