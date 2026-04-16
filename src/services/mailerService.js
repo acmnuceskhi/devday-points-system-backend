@@ -25,8 +25,8 @@ async function getTransporter() {
 
     transporter = nodemailer.createTransport({
         host,
-        // port: env.SMTP_PORT,
-        // secure: env.SMTP_SECURE,
+        port: 465,
+        secure: true,
         auth: {
             user: env.SMTP_USER,
             pass: env.SMTP_PASS,
