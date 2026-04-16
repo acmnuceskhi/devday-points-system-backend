@@ -20,7 +20,6 @@ function getTransporter() {
             user: env.SMTP_USER,
             pass: env.SMTP_PASS,
         },
-        family: 4,            // Railway containers lack IPv6 routing; force IPv4
         connectionTimeout: 15000,
     });
 
