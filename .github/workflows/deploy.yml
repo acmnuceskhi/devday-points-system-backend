@@ -50,4 +50,4 @@ jobs:
             --service-arn "$SERVICE_ARN" \
             --primary-container "{\"image\":\"$IMAGE\"}" \
             --region "$AWS_REGION" \
-            --monitor-resources
+            --monitor-mode TEXT-ONLY
