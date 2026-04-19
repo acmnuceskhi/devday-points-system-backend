@@ -2,19 +2,20 @@ name: Deploy
 
 on:
   push:
-    branches: [dev, main, prod]
+    branches: [dev, master, prod]
 
 jobs:
   deploy:
     name: Deploy to ${{ github.ref_name }}
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name }}
+    environment: ${{ github.ref_name == 'master' && 'main' || github.ref_name }}
 
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
       ECR_REPO: devday-points-backend
-      SERVICE_NAME: devday-points-backend-${{ github.ref_name }}
-      CLUSTER_NAME: devday-${{ github.ref_name }}
+      ENV_NAME: ${{ github.ref_name == 'master' && 'main' || github.ref_name }}
+      SERVICE_NAME: devday-points-backend-${{ github.ref_name == 'master' && 'main' || github.ref_name }}
+      CLUSTER_NAME: devday-${{ github.ref_name == 'master' && 'main' || github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
