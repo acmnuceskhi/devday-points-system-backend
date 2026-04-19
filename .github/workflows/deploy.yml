@@ -1,13 +1,20 @@
-name: Deploy to AWS ECS
+name: Deploy
 
 on:
   push:
-    branches: [master]
+    branches: [dev, main, prod]
 
 jobs:
   deploy:
-    name: Build and Deploy
+    name: Deploy to ${{ github.ref_name }}
     runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REPO: devday-points-backend
+      SERVICE_NAME: devday-points-backend-${{ github.ref_name }}
+      CLUSTER_NAME: devday-${{ github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -17,27 +24,29 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push image to ECR
-        id: build-image
+        id: build
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/devday-points-backend:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/devday-points-backend:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/devday-points-backend:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          docker build -t $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG
+          echo "image=$ECR_REGISTRY/$ECR_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-      - name: Deploy new image to ECS Express Mode
+      - name: Deploy new image to ${{ github.ref_name }}
         env:
-          IMAGE: ${{ steps.build-image.outputs.image }}
+          IMAGE: ${{ steps.build.outputs.image }}
         run: |
           aws ecs update-express-gateway-service \
-            --service-name devday-points-backend \
-            --image "$IMAGE" \
-            --region ${{ secrets.AWS_REGION }}
+            --service-name "$SERVICE_NAME" \
+            --cluster "$CLUSTER_NAME" \
+            --primary-container "{\"image\":\"$IMAGE\"}" \
+            --region "$AWS_REGION" \
+            --monitor-resources
