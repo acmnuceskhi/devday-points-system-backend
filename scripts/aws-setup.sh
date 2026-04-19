@@ -15,7 +15,7 @@ if [[ "$ENV" != "dev" && "$ENV" != "main" && "$ENV" != "prod" ]]; then
 fi
 
 # ── AWS config ────────────────────────────────────────────────────────────────
-AWS_REGION="us-east-1"            # change to your preferred region
+AWS_REGION="ap-south-1"           # Mumbai — closest to Karachi
 ECR_REPO="devday-points-backend"  # shared ECR repo for all envs
 
 SERVICE_NAME="devday-points-backend-$ENV"
@@ -49,16 +49,16 @@ elif [ "$ENV" = "main" ]; then
   SMTP_FROM_NAME="DevDay 2026 (staging)"
 
 else  # dev
-  DATABASE_URL=""                 # Supabase dev connection string
+  DATABASE_URL="postgresql://placeholder:placeholder@placeholder/placeholder"
   JWT_SECRET="dev-secret-change-me-12chars"
   JWT_EXPIRES_IN="24h"
   FRONTEND_ORIGIN="http://localhost:5173"
-  SIGNUP_VERIFY_BASE_URL=""
-  SYSTEM_STAFF_PROFILE_ID=""
+  SIGNUP_VERIFY_BASE_URL="http://localhost:5173/verify"
+  SYSTEM_STAFF_PROFILE_ID="00000000-0000-0000-0000-000000000000"
   ALLOW_EMPTY_PASSWORD_LOGIN="true"
-  SMTP_USER=""
-  SMTP_PASS=""
-  SMTP_FROM_EMAIL=""
+  SMTP_USER="placeholder@gmail.com"
+  SMTP_PASS="placeholder"
+  SMTP_FROM_EMAIL="placeholder@gmail.com"
   SMTP_FROM_NAME="DevDay 2026 (dev)"
 fi
 # ─────────────────────────────────────────────────────────────────────────────
@@ -139,8 +139,8 @@ SVC_OUTPUT=$(aws ecs create-express-gateway-service \
   --execution-role-arn "$EXEC_ROLE_ARN" \
   --infrastructure-role-arn "$INFRA_ROLE_ARN" \
   --primary-container "$PRIMARY_CONTAINER" \
-  --cpu 1 \
-  --memory 2 \
+  --cpu "512" \
+  --memory "1024" \
   --health-check-path "/health" \
   --monitor-resources \
   --region "$AWS_REGION")
