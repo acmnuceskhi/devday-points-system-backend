@@ -8,7 +8,7 @@ jobs:
   deploy:
     name: Deploy to ${{ github.ref_name }}
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'master' && 'main' || github.ref_name }}
+    environment: ${{ github.ref_name }}
 
     env:
       AWS_REGION: ${{ secrets.AWS_REGION }}
