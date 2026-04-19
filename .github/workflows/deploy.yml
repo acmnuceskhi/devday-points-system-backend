@@ -49,6 +49,4 @@ jobs:
           aws ecs update-express-gateway-service \
             --service-arn "$SERVICE_ARN" \
             --primary-container "{\"image\":\"$IMAGE\"}" \
-            --region "$AWS_REGION" \
-            --monitor-resources \
-            --monitor-mode TEXT-ONLY
+            --region "$AWS_REGION"
