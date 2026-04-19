@@ -16,6 +16,9 @@ const {
 
 const OTP_TTL_MINUTES = 15;
 const OTP_RESEND_COOLDOWN_SECONDS = 60;
+const MINIGAME_CODE_LENGTH = 6;
+const MINIGAME_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+const MINIGAME_CODE_MAX_ATTEMPTS = 12;
 const PARTICIPANT_ALREADY_REGISTERED_CODE = "PARTICIPANT_ALREADY_REGISTERED";
 const EXISTING_PARTICIPANT_SIGNUP_MESSAGE =
     "You already have a registered account, likely because you registered for a competition. Your password has already been emailed to you. Use that to log in.";
@@ -36,6 +39,69 @@ function buildSignupLink(email, token) {
     const base = env.SIGNUP_VERIFY_BASE_URL || `${env.FRONTEND_ORIGIN}/signup/verify`;
     const separator = base.includes("?") ? "&" : "?";
     return `${base}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+}
+
+function generateMinigameCode() {
+    let code = "";
+    const random = randomBytes(MINIGAME_CODE_LENGTH);
+
+    for (let i = 0; i < MINIGAME_CODE_LENGTH; i += 1) {
+        const index = random[i] % MINIGAME_CODE_ALPHABET.length;
+        code += MINIGAME_CODE_ALPHABET[index];
+    }
+
+    return code;
+}
+
+function isUniqueViolation(error) {
+    if (!error) return false;
+
+    if (error.code === "23505") {
+        return true;
+    }
+
+    const message = String(error.message || "").toLowerCase();
+    return message.includes("duplicate") || message.includes("unique");
+}
+
+async function assignMinigameCodeIfMissing(tx, participantId) {
+    for (let attempt = 1; attempt <= MINIGAME_CODE_MAX_ATTEMPTS; attempt += 1) {
+        const candidateCode = generateMinigameCode();
+
+        try {
+            const updatedParticipant = (await tx.$queryRaw`
+                UPDATE "Participant"
+                SET
+                    "minigameCode" = ${candidateCode},
+                    "updatedAt" = NOW()
+                WHERE id = ${participantId}
+                  AND "minigameCode" IS NULL
+                RETURNING "minigameCode"
+            `)[0];
+
+            if (updatedParticipant?.minigameCode) {
+                return updatedParticipant.minigameCode;
+            }
+
+            const existingParticipant = (await tx.$queryRaw`
+                SELECT "minigameCode"
+                FROM "Participant"
+                WHERE id = ${participantId}
+                LIMIT 1
+            `)[0];
+
+            if (existingParticipant?.minigameCode) {
+                return String(existingParticipant.minigameCode).toUpperCase();
+            }
+        } catch (error) {
+            if (isUniqueViolation(error)) {
+                continue;
+            }
+            throw error;
+        }
+    }
+
+    throw new HttpError(500, "Could not assign minigame code. Please try again.");
 }
 
 async function loginParticipant(email, inputPassword) {
@@ -70,10 +136,21 @@ async function loginParticipant(email, inputPassword) {
         throw new HttpError(401, "Invalid credentials");
     }
 
-    const participant = await findParticipantByUserId(user.id);
+    let participant = await findParticipantByUserId(user.id);
 
     if (!participant) {
         throw new HttpError(403, "No participant profile found");
+    }
+
+    if (!participant.minigameCode) {
+        await prisma.$transaction(async (tx) => {
+            await assignMinigameCodeIfMissing(tx, participant.id);
+        });
+
+        participant = await findParticipantByUserId(user.id);
+        if (!participant) {
+            throw new HttpError(403, "No participant profile found");
+        }
     }
 
     await logUserAction(user.id, "LOGIN");
@@ -259,7 +336,7 @@ async function requestParticipantSignup(email, fullName, requestedIp) {
     }
 
     return {
-        message: "Signup verification link has been sent to your email.",
+        message: `Verification email sent to ${normalizedEmail} if such an email exists.`,
         hint: "If you already registered for a competition, use that same email so your scores stay in one place.",
         signupLink: env.NODE_ENV === "production" ? undefined : signupLink,
         expiresInMinutes: OTP_TTL_MINUTES,
@@ -314,6 +391,8 @@ async function verifyParticipantSignup(email, token, password) {
     let resolvedUserId = participantAccount?.userId || existingUser?.id || null;
 
     await prisma.$transaction(async (tx) => {
+        let participantId = null;
+
         await tx.$queryRaw`
             UPDATE "SignupOtpLink"
             SET
@@ -351,6 +430,7 @@ async function verifyParticipantSignup(email, token, password) {
         `)[0];
 
         if (participantByEmail) {
+            participantId = participantByEmail.id;
             if (participantByEmail.userId !== resolvedUserId) {
                 await tx.$queryRaw`
                     UPDATE "Participant"
@@ -362,7 +442,7 @@ async function verifyParticipantSignup(email, token, password) {
                 `;
             }
         } else {
-            await tx.$queryRaw`
+            const createdParticipant = (await tx.$queryRaw`
                 INSERT INTO "Participant"
                     (id, "userId", cnic, email, "fullName", "createdAt", "updatedAt")
                 VALUES
@@ -375,7 +455,13 @@ async function verifyParticipantSignup(email, token, password) {
                         NOW(),
                         NOW()
                     )
-            `;
+                RETURNING id
+            `)[0];
+            participantId = createdParticipant?.id || null;
+        }
+
+        if (participantId) {
+            await assignMinigameCodeIfMissing(tx, participantId);
         }
     });
 
