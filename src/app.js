@@ -22,7 +22,13 @@ function buildAllowedOrigins(originValue) {
         "http://127.0.0.1:4173",
     ];
 
-    return new Set([...defaults, ...fromEnv]);
+    const all = [...defaults, ...fromEnv];
+    const exact = new Set(all.filter((o) => !o.startsWith("*-")));
+    const wildcards = all
+        .filter((o) => o.startsWith("*-"))
+        .map((o) => o.slice(2)); // "*-foo.com" → "foo.com"
+
+    return { exact, wildcards };
 }
 
 const allowedOrigins = buildAllowedOrigins(env.FRONTEND_ORIGIN);
@@ -30,13 +36,18 @@ const allowedOrigins = buildAllowedOrigins(env.FRONTEND_ORIGIN);
 app.use(
     cors({
         origin(origin, callback) {
-            // Allow same-origin and non-browser clients.
             if (!origin) {
                 callback(null, true);
                 return;
             }
 
-            if (allowedOrigins.has(origin)) {
+            if (allowedOrigins.exact.has(origin)) {
+                callback(null, true);
+                return;
+            }
+
+            const host = origin.replace(/^https?:\/\//, "");
+            if (allowedOrigins.wildcards.some((w) => host.endsWith(w))) {
                 callback(null, true);
                 return;
             }
