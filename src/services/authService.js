@@ -19,6 +19,7 @@ const OTP_RESEND_COOLDOWN_SECONDS = 60;
 const MINIGAME_CODE_LENGTH = 6;
 const MINIGAME_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 const MINIGAME_CODE_MAX_ATTEMPTS = 12;
+const ADMIN_PASSWORD_NOT_SET_CODE = "ADMIN_PASSWORD_NOT_SET";
 const PARTICIPANT_ALREADY_REGISTERED_CODE = "PARTICIPANT_ALREADY_REGISTERED";
 const EXISTING_PARTICIPANT_SIGNUP_MESSAGE =
     "You already have a registered account, likely because you registered for a competition. Your password has already been emailed to you. Use that to log in.";
@@ -120,13 +121,7 @@ async function loginParticipant(email, inputPassword) {
     const normalizedInput = inputPassword || "";
 
     if (passwordInDb === "") {
-        if (!env.ALLOW_EMPTY_PASSWORD_LOGIN) {
-            throw new HttpError(403, "Empty-password login is disabled");
-        }
-
-        if (normalizedInput !== "") {
-            throw new HttpError(401, "Invalid credentials");
-        }
+        throw new HttpError(401, "Invalid credentials");
     } else if (isBcryptHash(passwordInDb)) {
         const matches = await bcrypt.compare(normalizedInput, passwordInDb);
         if (!matches) {
@@ -192,13 +187,9 @@ async function loginAdmin(email, inputPassword) {
     const normalizedInput = inputPassword || "";
 
     if (passwordInDb === "") {
-        if (!env.ALLOW_EMPTY_PASSWORD_LOGIN) {
-            throw new HttpError(403, "Empty-password login is disabled");
-        }
-
-        if (normalizedInput !== "") {
-            throw new HttpError(401, "Invalid credentials");
-        }
+        throw new HttpError(403, "Password is not set for this admin account", {
+            code: ADMIN_PASSWORD_NOT_SET_CODE,
+        });
     } else if (isBcryptHash(passwordInDb)) {
         const matches = await bcrypt.compare(normalizedInput, passwordInDb);
         if (!matches) {
@@ -431,16 +422,14 @@ async function verifyParticipantSignup(email, token, password) {
 
         if (participantByEmail) {
             participantId = participantByEmail.id;
-            if (participantByEmail.userId !== resolvedUserId) {
-                await tx.$queryRaw`
-                    UPDATE "Participant"
-                    SET
-                        "userId" = ${resolvedUserId},
-                        "fullName" = ${String(otp.fullName || "").trim() || "Participant"},
-                        "updatedAt" = NOW()
-                    WHERE id = ${participantByEmail.id}
-                `;
-            }
+            await tx.$queryRaw`
+                UPDATE "Participant"
+                SET
+                    "userId" = ${resolvedUserId},
+                    "fullName" = ${String(otp.fullName || "").trim() || "Participant"},
+                    "updatedAt" = NOW()
+                WHERE id = ${participantByEmail.id}
+            `;
         } else {
             const createdParticipant = (await tx.$queryRaw`
                 INSERT INTO "Participant"
