@@ -15,6 +15,7 @@ jobs:
       ECR_REPO: devday-points-backend
       SERVICE_NAME: devday-points-backend-${{ github.ref_name }}
       CLUSTER_NAME: devday-${{ github.ref_name }}
+      SECRET_ARN: arn:aws:secretsmanager:${{ secrets.AWS_REGION }}:617484368858:secret:devday/${{ github.ref_name }}
 
     steps:
       - uses: actions/checkout@v4
@@ -46,7 +47,24 @@ jobs:
         run: |
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           SERVICE_ARN="arn:aws:ecs:${AWS_REGION}:${ACCOUNT_ID}:service/${CLUSTER_NAME}/${SERVICE_NAME}"
+          SECRETS='[
+            {"name":"DATABASE_URL","valueFrom":"'"$SECRET_ARN"':DATABASE_URL::"},
+            {"name":"JWT_SECRET","valueFrom":"'"$SECRET_ARN"':JWT_SECRET::"},
+            {"name":"JWT_EXPIRES_IN","valueFrom":"'"$SECRET_ARN"':JWT_EXPIRES_IN::"},
+            {"name":"FRONTEND_ORIGIN","valueFrom":"'"$SECRET_ARN"':FRONTEND_ORIGIN::"},
+            {"name":"SIGNUP_VERIFY_BASE_URL","valueFrom":"'"$SECRET_ARN"':SIGNUP_VERIFY_BASE_URL::"},
+            {"name":"SYSTEM_STAFF_PROFILE_ID","valueFrom":"'"$SECRET_ARN"':SYSTEM_STAFF_PROFILE_ID::"},
+            {"name":"ALLOW_EMPTY_PASSWORD_LOGIN","valueFrom":"'"$SECRET_ARN"':ALLOW_EMPTY_PASSWORD_LOGIN::"},
+            {"name":"SMTP_USER","valueFrom":"'"$SECRET_ARN"':SMTP_USER::"},
+            {"name":"SMTP_PASS","valueFrom":"'"$SECRET_ARN"':SMTP_PASS::"},
+            {"name":"SMTP_FROM_EMAIL","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_EMAIL::"},
+            {"name":"SMTP_FROM_NAME","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_NAME::"}
+          ]'
+          CONTAINER=$(jq -n \
+            --arg image "$IMAGE" \
+            --argjson secrets "$SECRETS" \
+            '{image: $image, containerPort: 3000, environment: [{name:"NODE_ENV",value:"production"},{name:"PORT",value:"3000"},{name:"SMTP_HOST",value:"smtp.gmail.com"},{name:"SMTP_PORT",value:"587"},{name:"SMTP_SECURE",value:"false"}], secrets: $secrets}')
           aws ecs update-express-gateway-service \
             --service-arn "$SERVICE_ARN" \
-            --primary-container "{\"image\":\"$IMAGE\"}" \
+            --primary-container "$CONTAINER" \
             --region "$AWS_REGION"
