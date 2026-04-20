@@ -27,7 +27,7 @@ async function findUserById(userId) {
 
 async function findParticipantByUserId(userId) {
     const data = await prisma.$queryRaw`
-        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "createdAt", "updatedAt"
+        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "minigameCode", "createdAt", "updatedAt"
         FROM "Participant"
         WHERE "userId" = ${userId}
         LIMIT 1
@@ -38,7 +38,7 @@ async function findParticipantByUserId(userId) {
 
 async function findParticipantByEmail(email) {
     const data = await prisma.$queryRaw`
-        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "createdAt", "updatedAt"
+        SELECT id, "userId", cnic, email, "fullName", phone, institution, "rollNumber", "minigameCode", "createdAt", "updatedAt"
         FROM "Participant"
         WHERE lower(email) = lower(${email})
         LIMIT 1

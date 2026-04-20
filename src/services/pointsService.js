@@ -808,11 +808,11 @@ async function reviewSubmission(submissionId, decision, actorStaffProfileId, not
             throw new HttpError(404, "Submission not found");
         }
 
-        if (submission.status !== "PENDING") {
-            throw new HttpError(409, "Submission already reviewed");
-        }
-
         if (decision === "APPROVED") {
+            if (submission.status !== "PENDING") {
+                throw new HttpError(409, "Submission already reviewed");
+            }
+
             const completionResult = await grantCompletion(
                 tx,
                 {
@@ -858,6 +858,31 @@ async function reviewSubmission(submissionId, decision, actorStaffProfileId, not
             return { submissionId, decision, completion: completionResult.completion, summary: completionResult.summary };
         }
 
+        if (submission.status === "REJECTED") {
+            return { submissionId, decision, noOp: true };
+        }
+
+        let completionReversal = null;
+        if (submission.status === "APPROVED") {
+            const relatedCompletion = (await tx.$queryRaw`
+                SELECT id
+                FROM "ParticipantActivityCompletion"
+                WHERE "participantId" = ${submission.participantId}
+                  AND "activityId" = ${submission.activityId}
+                LIMIT 1
+            `)[0];
+
+            if (relatedCompletion?.id) {
+                completionReversal = await revokeCompletionById(
+                    tx,
+                    relatedCompletion.id,
+                    note || "Submission rejected after approval",
+                    actorStaffProfileId,
+                    { createAuditLogEntry: true }
+                );
+            }
+        }
+
         await tx.$queryRaw`
             UPDATE "ActivitySubmission"
             SET
@@ -882,11 +907,21 @@ async function reviewSubmission(submissionId, decision, actorStaffProfileId, not
                     ${JSON.stringify({
             participantId: submission.participantId,
             activityId: submission.activityId,
+            previousStatus: submission.status,
+            completionReversed: Boolean(completionReversal),
+            pointsRemoved: completionReversal ? completionReversal.pointsRemoved : 0,
         })}::jsonb
                 )
         `;
 
-        return { submissionId, decision };
+        return {
+            submissionId,
+            decision,
+            previousStatus: submission.status,
+            completionReversed: Boolean(completionReversal),
+            pointsRemoved: completionReversal ? completionReversal.pointsRemoved : 0,
+            noOp: false,
+        };
     });
 }
 
@@ -1154,9 +1189,14 @@ async function getParticipantAdminDetails(participantId) {
     };
 }
 
-async function revokeActivityCompletion(completionId, note, actorStaffProfileId) {
-    return prisma.$transaction(async (tx) => {
-        const completion = (await tx.$queryRaw`
+async function revokeCompletionById(
+    tx,
+    completionId,
+    note,
+    actorStaffProfileId,
+    options = { createAuditLogEntry: true }
+) {
+    const completion = (await tx.$queryRaw`
             SELECT
                 pac.id,
                 pac."participantId",
@@ -1167,23 +1207,23 @@ async function revokeActivityCompletion(completionId, note, actorStaffProfileId)
             INNER JOIN "Activity" a ON a.id = pac."activityId"
             WHERE pac.id = ${completionId}
             LIMIT 1
-        `)[0];
+    `)[0];
 
-        if (!completion) {
-            throw new HttpError(404, "Activity completion not found");
-        }
+    if (!completion) {
+        throw new HttpError(404, "Activity completion not found");
+    }
 
-        await tx.$queryRaw`
+    await tx.$queryRaw`
             DELETE FROM "PointsLedger"
             WHERE "sourceCompletionId" = ${completionId}
-        `;
+    `;
 
-        await tx.$queryRaw`
+    await tx.$queryRaw`
             DELETE FROM "ParticipantActivityCompletion"
             WHERE id = ${completionId}
-        `;
+    `;
 
-        const summary = (await tx.$queryRaw`
+    const summary = (await tx.$queryRaw`
             INSERT INTO "PointsSummary" ("participantId", "totalPoints", "updatedAt")
             VALUES (${completion.participantId}, ${-completion.points}, NOW())
             ON CONFLICT ("participantId")
@@ -1191,8 +1231,9 @@ async function revokeActivityCompletion(completionId, note, actorStaffProfileId)
                 "totalPoints" = "PointsSummary"."totalPoints" + EXCLUDED."totalPoints",
                 "updatedAt" = NOW()
             RETURNING "participantId", "totalPoints", "updatedAt"
-        `)[0];
+    `)[0];
 
+    if (options.createAuditLogEntry !== false) {
         await tx.$queryRaw`
             INSERT INTO "PointsAuditLog"
                 (id, "actorStaffProfileId", "actionType", "targetType", "targetId", note, payload)
@@ -1211,13 +1252,21 @@ async function revokeActivityCompletion(completionId, note, actorStaffProfileId)
         })}::jsonb
                 )
         `;
+    }
 
-        return {
-            completionId,
-            participantId: completion.participantId,
-            pointsRemoved: completion.points,
-            summary,
-        };
+    return {
+        completionId,
+        participantId: completion.participantId,
+        pointsRemoved: completion.points,
+        summary,
+    };
+}
+
+async function revokeActivityCompletion(completionId, note, actorStaffProfileId) {
+    return prisma.$transaction(async (tx) => {
+        return revokeCompletionById(tx, completionId, note, actorStaffProfileId, {
+            createAuditLogEntry: true,
+        });
     });
 }
 
