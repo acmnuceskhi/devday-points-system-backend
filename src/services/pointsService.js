@@ -16,6 +16,8 @@ const SUBMISSION_REQUIRED_CODES = new Set([
     "CORRECT_ANSWER",
 ]);
 const COMPETITION_ACTIVITY_POINTS_KEY = "COMPETITION_ACTIVITY_POINTS";
+const MINIGAME_ACTIVITY_POINTS_KEY = "MINIGAME_ACTIVITY_POINTS";
+const MINIGAME_ACTIVITY_OVERRIDE_PREFIX = "MINIGAME_ACTIVITY_POINTS_OVERRIDE__";
 
 function normalizeAnswerText(value) {
     return String(value || "")
@@ -106,6 +108,11 @@ async function getMyActivityProgress(participantId) {
             a.description,
             a.points,
             a."isActive",
+            CASE
+                WHEN a.code LIKE 'COMP\\_%\\_PARTICIPATION' THEN 'COMPETITION'
+                WHEN a.code LIKE 'MINIGAME\\_%\\_PARTICIPATION' THEN 'MINIGAME'
+                ELSE 'REGULAR'
+            END AS "activityCategory",
             a."correctAnswerCanonical" IS NOT NULL AS "hasCorrectAnswer",
             at.code AS "activityTypeCode",
             pac.id AS "completionId",
@@ -1115,6 +1122,101 @@ async function clearCompetitionActivityPointsOverride(competitionId) {
     return getCompetitionActivityPointsConfig();
 }
 
+async function getMinigameActivityPointsConfig() {
+    const globalRow = (await prisma.$queryRaw`
+        SELECT "valueText"
+        FROM "MasterConfig"
+        WHERE key = ${MINIGAME_ACTIVITY_POINTS_KEY}
+        LIMIT 1
+    `)[0];
+
+    const minigames = await prisma.$queryRaw`
+        SELECT id, name
+        FROM "Minigame"
+        ORDER BY name ASC
+    `;
+
+    const overrideRows = await prisma.$queryRaw`
+        SELECT key, "valueText"
+        FROM "MasterConfig"
+        WHERE key LIKE ${`${MINIGAME_ACTIVITY_OVERRIDE_PREFIX}%`}
+        ORDER BY key ASC
+    `;
+
+    const overrideByMinigameId = new Map();
+    for (const row of overrideRows) {
+        const rawKey = String(row.key || "");
+        const minigameId = rawKey.slice(MINIGAME_ACTIVITY_OVERRIDE_PREFIX.length);
+        if (!minigameId) continue;
+        const parsed = Number(row.valueText);
+        if (Number.isFinite(parsed)) {
+            overrideByMinigameId.set(minigameId, parsed);
+        }
+    }
+
+    return {
+        key: MINIGAME_ACTIVITY_POINTS_KEY,
+        globalDefaultPoints: globalRow?.valueText ? Number(globalRow.valueText) : null,
+        overrides: minigames.map((item) => ({
+            minigameId: item.id,
+            minigameName: item.name,
+            points: overrideByMinigameId.has(item.id)
+                ? overrideByMinigameId.get(item.id)
+                : null,
+        })),
+    };
+}
+
+async function setMinigameActivityPointsDefault(points) {
+    await prisma.$queryRaw`
+        INSERT INTO "MasterConfig" (id, key, "valueText", "createdAt", "updatedAt")
+        VALUES (${randomUUID()}, ${MINIGAME_ACTIVITY_POINTS_KEY}, ${String(points)}, NOW(), NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET
+            "valueText" = EXCLUDED."valueText",
+            "updatedAt" = NOW()
+    `;
+
+    return getMinigameActivityPointsConfig();
+}
+
+async function setMinigameActivityPointsOverride(minigameId, points) {
+    const exists = (await prisma.$queryRaw`
+        SELECT id
+        FROM "Minigame"
+        WHERE id = ${minigameId}
+        LIMIT 1
+    `)[0];
+
+    if (!exists) {
+        throw new HttpError(404, "Minigame not found");
+    }
+
+    const key = `${MINIGAME_ACTIVITY_OVERRIDE_PREFIX}${minigameId}`;
+
+    await prisma.$queryRaw`
+        INSERT INTO "MasterConfig" (id, key, "valueText", "createdAt", "updatedAt")
+        VALUES (${randomUUID()}, ${key}, ${String(points)}, NOW(), NOW())
+        ON CONFLICT (key)
+        DO UPDATE SET
+            "valueText" = EXCLUDED."valueText",
+            "updatedAt" = NOW()
+    `;
+
+    return getMinigameActivityPointsConfig();
+}
+
+async function clearMinigameActivityPointsOverride(minigameId) {
+    const key = `${MINIGAME_ACTIVITY_OVERRIDE_PREFIX}${minigameId}`;
+
+    await prisma.$queryRaw`
+        DELETE FROM "MasterConfig"
+        WHERE key = ${key}
+    `;
+
+    return getMinigameActivityPointsConfig();
+}
+
 async function getParticipantAdminDetails(participantId) {
     const participant = (await prisma.$queryRaw`
         SELECT id AS "participantId", "fullName", institution, email, phone
@@ -1419,6 +1521,10 @@ module.exports = {
     setCompetitionActivityPointsDefault,
     setCompetitionActivityPointsOverride,
     clearCompetitionActivityPointsOverride,
+    getMinigameActivityPointsConfig,
+    setMinigameActivityPointsDefault,
+    setMinigameActivityPointsOverride,
+    clearMinigameActivityPointsOverride,
     getParticipantAdminDetails,
     revokeActivityCompletion,
     adjustParticipantPoints,

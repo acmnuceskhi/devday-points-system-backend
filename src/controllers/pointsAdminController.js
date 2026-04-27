@@ -17,6 +17,10 @@ const {
     setCompetitionActivityPointsDefault,
     setCompetitionActivityPointsOverride,
     clearCompetitionActivityPointsOverride,
+    getMinigameActivityPointsConfig,
+    setMinigameActivityPointsDefault,
+    setMinigameActivityPointsOverride,
+    clearMinigameActivityPointsOverride,
     reviewSubmission,
 } = require("../services/pointsService");
 
@@ -123,6 +127,26 @@ async function deleteCompetitionActivityPointsOverride(req, res) {
     res.json(config);
 }
 
+async function minigameActivityPointsConfig(req, res) {
+    const config = await getMinigameActivityPointsConfig();
+    res.json(config);
+}
+
+async function updateMinigameActivityPointsDefault(req, res) {
+    const config = await setMinigameActivityPointsDefault(req.body.points);
+    res.json(config);
+}
+
+async function updateMinigameActivityPointsOverride(req, res) {
+    const config = await setMinigameActivityPointsOverride(req.params.minigameId, req.body.points);
+    res.json(config);
+}
+
+async function deleteMinigameActivityPointsOverride(req, res) {
+    const config = await clearMinigameActivityPointsOverride(req.params.minigameId);
+    res.json(config);
+}
+
 async function approveSubmission(req, res) {
     const result = await reviewSubmission(
         req.params.submissionId,
@@ -177,6 +201,10 @@ module.exports = {
     updateCompetitionActivityPointsDefault,
     updateCompetitionActivityPointsOverride,
     deleteCompetitionActivityPointsOverride,
+    minigameActivityPointsConfig,
+    updateMinigameActivityPointsDefault,
+    updateMinigameActivityPointsOverride,
+    deleteMinigameActivityPointsOverride,
     approveSubmission,
     rejectSubmission,
     auditLogs,

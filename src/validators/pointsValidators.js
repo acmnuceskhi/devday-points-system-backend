@@ -115,6 +115,10 @@ const competitionIdParamSchema = z.object({
     competitionId: z.string().uuid("Invalid competition id"),
 });
 
+const minigameIdParamSchema = z.object({
+    minigameId: z.string().uuid("Invalid minigame id"),
+});
+
 const pendingSubmissionQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(20),
     offset: z.coerce.number().int().min(0).default(0),
@@ -137,6 +141,14 @@ const competitionActivityPointsDefaultBodySchema = z.object({
 });
 
 const competitionActivityPointsOverrideBodySchema = z.object({
+    points: z.number().int().min(0).max(1000),
+});
+
+const minigameActivityPointsDefaultBodySchema = z.object({
+    points: z.number().int().min(0).max(1000),
+});
+
+const minigameActivityPointsOverrideBodySchema = z.object({
     points: z.number().int().min(0).max(1000),
 });
 
@@ -179,11 +191,14 @@ module.exports = {
     participantDetailParamSchema,
     participantActivitySubmissionParamSchema,
     competitionIdParamSchema,
+    minigameIdParamSchema,
     pendingSubmissionQuerySchema,
     activitySubmissionsQuerySchema,
     reviewSubmissionBodySchema,
     competitionActivityPointsDefaultBodySchema,
     competitionActivityPointsOverrideBodySchema,
+    minigameActivityPointsDefaultBodySchema,
+    minigameActivityPointsOverrideBodySchema,
     auditLogQuerySchema,
     activityTypeListQuerySchema,
 };

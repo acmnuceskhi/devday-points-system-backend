@@ -17,6 +17,10 @@ const {
     updateCompetitionActivityPointsDefault,
     updateCompetitionActivityPointsOverride,
     deleteCompetitionActivityPointsOverride,
+    minigameActivityPointsConfig,
+    updateMinigameActivityPointsDefault,
+    updateMinigameActivityPointsOverride,
+    deleteMinigameActivityPointsOverride,
     approveSubmission,
     rejectSubmission,
     auditLogs,
@@ -39,12 +43,15 @@ const {
     participantDetailParamSchema,
     participantActivitySubmissionParamSchema,
     competitionIdParamSchema,
+    minigameIdParamSchema,
     pendingSubmissionQuerySchema,
     activitySubmissionsQuerySchema,
     submissionIdParamSchema,
     reviewSubmissionBodySchema,
     competitionActivityPointsDefaultBodySchema,
     competitionActivityPointsOverrideBodySchema,
+    minigameActivityPointsDefaultBodySchema,
+    minigameActivityPointsOverrideBodySchema,
 } = require("../validators/pointsValidators");
 
 const router = express.Router();
@@ -137,6 +144,26 @@ router.delete(
     "/config/competition-activity-points/overrides/:competitionId",
     validate(competitionIdParamSchema, "params"),
     asyncHandler(deleteCompetitionActivityPointsOverride)
+);
+router.get(
+    "/config/minigame-activity-points",
+    asyncHandler(minigameActivityPointsConfig)
+);
+router.patch(
+    "/config/minigame-activity-points/default",
+    validate(minigameActivityPointsDefaultBodySchema),
+    asyncHandler(updateMinigameActivityPointsDefault)
+);
+router.put(
+    "/config/minigame-activity-points/overrides/:minigameId",
+    validate(minigameIdParamSchema, "params"),
+    validate(minigameActivityPointsOverrideBodySchema),
+    asyncHandler(updateMinigameActivityPointsOverride)
+);
+router.delete(
+    "/config/minigame-activity-points/overrides/:minigameId",
+    validate(minigameIdParamSchema, "params"),
+    asyncHandler(deleteMinigameActivityPointsOverride)
 );
 router.post(
     "/submissions/:submissionId/approve",
