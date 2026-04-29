@@ -25,7 +25,7 @@ async function getParticipantCompetitions(participantId) {
     const teamIds = [...new Set(memberships.map((item) => item.teamId))];
 
     const teams = await prisma.$queryRaw`
-        SELECT id, "competitionId", name, "paymentStatus"
+        SELECT id, "competitionId", name, "paymentStatus", venue
         FROM "Team"
         WHERE id IN (${Prisma.join(teamIds)})
     `;
@@ -101,6 +101,7 @@ async function getParticipantCompetitions(participantId) {
                 compDay: competition.compDay,
                 startTime: competition.startTime,
                 endTime: competition.endTime,
+                teamVenue: team.venue ?? null,
                 venueId: firstVenue ? firstVenue.id : null,
                 venueName: firstVenue ? firstVenue.name : null,
                 venues: competitionVenues,
