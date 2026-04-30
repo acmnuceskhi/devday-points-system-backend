@@ -30,6 +30,8 @@ const env = {
             return null;
         }
     })(),
+    AWS_REGION: process.env.AWS_REGION || "",
+    SES_FROM_EMAIL: process.env.SES_FROM_EMAIL || "",
     SYSTEM_STAFF_PROFILE_ID: process.env.SYSTEM_STAFF_PROFILE_ID || "",
     ALLOW_EMPTY_PASSWORD_LOGIN:
         (process.env.ALLOW_EMPTY_PASSWORD_LOGIN || "true").toLowerCase() === "true",
