@@ -1,33 +1,56 @@
 const nodemailer = require("nodemailer");
 const { env } = require("../config/env");
 
-let transporter = null;
+let pool = null;
+let idx = 0;
 
-function getTransporter() {
-    if (transporter) {
-        return transporter;
+function buildTransporterPool() {
+    const accounts = env.SMTP_ACCOUNTS;
+
+    if (accounts && accounts.length > 0) {
+        return accounts
+            .filter((a) => a.user && a.pass)
+            .map((a) => ({
+                fromEmail: a.fromEmail || a.user,
+                transporter: nodemailer.createTransport({
+                    host: env.SMTP_HOST,
+                    port: env.SMTP_PORT,
+                    secure: env.SMTP_SECURE,
+                    auth: { user: a.user, pass: a.pass },
+                }),
+            }));
     }
 
     if (!env.SMTP_USER || !env.SMTP_PASS || !env.SMTP_FROM_EMAIL) {
-        return null;
+        return [];
     }
 
-    transporter = nodemailer.createTransport({
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_SECURE,
-        auth: {
-            user: env.SMTP_USER,
-            pass: env.SMTP_PASS,
+    return [
+        {
+            fromEmail: env.SMTP_FROM_EMAIL,
+            transporter: nodemailer.createTransport({
+                host: env.SMTP_HOST,
+                port: env.SMTP_PORT,
+                secure: env.SMTP_SECURE,
+                auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
+            }),
         },
-    });
+    ];
+}
 
-    return transporter;
+function getNextSender() {
+    if (!pool) {
+        pool = buildTransporterPool();
+    }
+    if (pool.length === 0) return null;
+    const sender = pool[idx % pool.length];
+    idx++;
+    return sender;
 }
 
 async function sendSignupOtpEmail({ toEmail, fullName, signupLink, expiresInMinutes }) {
-    const mailTransporter = getTransporter();
-    if (!mailTransporter) {
+    const sender = getNextSender();
+    if (!sender) {
         return {
             delivered: false,
             reason: "SMTP_NOT_CONFIGURED",
@@ -37,8 +60,8 @@ async function sendSignupOtpEmail({ toEmail, fullName, signupLink, expiresInMinu
     const safeName = String(fullName || "Participant").trim() || "Participant";
     const safeEmail = String(toEmail || "").trim();
 
-    await mailTransporter.sendMail({
-        from: `${env.SMTP_FROM_NAME} <${env.SMTP_FROM_EMAIL}>`,
+    await sender.transporter.sendMail({
+        from: `${env.SMTP_FROM_NAME} <${sender.fromEmail}>`,
         to: safeEmail,
         subject: "DevDay 2026 Signup Verification",
         text: [

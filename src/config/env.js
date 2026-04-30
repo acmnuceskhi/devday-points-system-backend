@@ -22,6 +22,14 @@ const env = {
     SMTP_PASS: process.env.SMTP_PASS || "",
     SMTP_FROM_EMAIL: process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER || "",
     SMTP_FROM_NAME: process.env.SMTP_FROM_NAME || "DevDay 2026",
+    SMTP_ACCOUNTS: (() => {
+        try {
+            const raw = process.env.SMTP_ACCOUNTS || "";
+            return raw ? JSON.parse(raw) : null;
+        } catch {
+            return null;
+        }
+    })(),
     SYSTEM_STAFF_PROFILE_ID: process.env.SYSTEM_STAFF_PROFILE_ID || "",
     ALLOW_EMPTY_PASSWORD_LOGIN:
         (process.env.ALLOW_EMPTY_PASSWORD_LOGIN || "true").toLowerCase() === "true",

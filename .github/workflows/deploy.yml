@@ -58,7 +58,8 @@ jobs:
             {"name":"SMTP_USER","valueFrom":"'"$SECRET_ARN"':SMTP_USER::"},
             {"name":"SMTP_PASS","valueFrom":"'"$SECRET_ARN"':SMTP_PASS::"},
             {"name":"SMTP_FROM_EMAIL","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_EMAIL::"},
-            {"name":"SMTP_FROM_NAME","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_NAME::"}
+            {"name":"SMTP_FROM_NAME","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_NAME::"},
+            {"name":"SMTP_ACCOUNTS","valueFrom":"'"$SECRET_ARN"':SMTP_ACCOUNTS::"}
           ]'
           CONTAINER=$(jq -n \
             --arg image "$IMAGE" \
