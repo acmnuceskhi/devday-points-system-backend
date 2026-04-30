@@ -58,12 +58,15 @@ jobs:
             {"name":"SMTP_USER","valueFrom":"'"$SECRET_ARN"':SMTP_USER::"},
             {"name":"SMTP_PASS","valueFrom":"'"$SECRET_ARN"':SMTP_PASS::"},
             {"name":"SMTP_FROM_EMAIL","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_EMAIL::"},
-            {"name":"SMTP_FROM_NAME","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_NAME::"}
+            {"name":"SMTP_FROM_NAME","valueFrom":"'"$SECRET_ARN"':SMTP_FROM_NAME::"},
+            {"name":"SMTP_ACCOUNTS","valueFrom":"'"$SECRET_ARN"':SMTP_ACCOUNTS::"},
+            {"name":"SES_FROM_EMAIL","valueFrom":"'"$SECRET_ARN"':SES_FROM_EMAIL::"}
           ]'
           CONTAINER=$(jq -n \
             --arg image "$IMAGE" \
+            --arg region "$AWS_REGION" \
             --argjson secrets "$SECRETS" \
-            '{image: $image, containerPort: 3000, environment: [{name:"NODE_ENV",value:"production"},{name:"PORT",value:"3000"},{name:"SMTP_HOST",value:"smtp.gmail.com"},{name:"SMTP_PORT",value:"587"},{name:"SMTP_SECURE",value:"false"}], secrets: $secrets}')
+            '{image: $image, containerPort: 3000, environment: [{name:"NODE_ENV",value:"production"},{name:"PORT",value:"3000"},{name:"SMTP_HOST",value:"smtp.gmail.com"},{name:"SMTP_PORT",value:"587"},{name:"SMTP_SECURE",value:"false"},{name:"AWS_REGION",value:$region}], secrets: $secrets}')
           aws ecs update-express-gateway-service \
             --service-arn "$SERVICE_ARN" \
             --primary-container "$CONTAINER" \
