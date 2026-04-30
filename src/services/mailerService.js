@@ -110,9 +110,12 @@ async function sendSignupOtpEmail({ toEmail, fullName, signupLink, expiresInMinu
         </div>
     `;
 
-    // Try Gmail round-robin first
-    const sender = getNextSender();
-    if (sender) {
+    // Try all Gmail accounts starting from current round-robin position
+    if (!pool) pool = buildTransporterPool();
+    const poolSize = pool.length;
+    for (let i = 0; i < poolSize; i++) {
+        const sender = getNextSender();
+        if (!sender) break;
         try {
             await sender.transporter.sendMail({
                 from: `${env.SMTP_FROM_NAME} <${sender.fromEmail}>`,
@@ -123,11 +126,11 @@ async function sendSignupOtpEmail({ toEmail, fullName, signupLink, expiresInMinu
             });
             return { delivered: true };
         } catch {
-            // SMTP failed — fall through to SES
+            // this account failed, try next
         }
     }
 
-    // SES fallback
+    // SES fallback — only reached if every SMTP account failed
     try {
         const sent = await sendViaSes({ toEmail: safeEmail, subject, text, html });
         if (sent) return { delivered: true };

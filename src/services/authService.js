@@ -317,8 +317,8 @@ async function requestParticipantSignup(email, fullName, requestedIp) {
         console.error(
             `[signup][request] email-delivery-failed email=${normalizedEmail} reason=${emailResult.reason || "UNKNOWN"}`
         );
-        throw new HttpError(500, "Signup email service is not configured. Please contact support.", {
-            code: "SIGNUP_EMAIL_NOT_CONFIGURED",
+        throw new HttpError(503, "Email delivery is temporarily unavailable. Please try again in a few minutes.", {
+            code: "EMAIL_DELIVERY_FAILED",
         });
     }
 
