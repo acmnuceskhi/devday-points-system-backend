@@ -6,38 +6,37 @@ const { env } = require("../config/env");
 let pool = null;
 let idx = 0;
 
+function makeTransporter(user, pass, fromEmail) {
+    return {
+        fromEmail: fromEmail || user,
+        transporter: nodemailer.createTransport({
+            host: env.SMTP_HOST,
+            port: env.SMTP_PORT,
+            secure: env.SMTP_SECURE,
+            auth: { user, pass },
+        }),
+    };
+}
+
 function buildTransporterPool() {
+    const pool = [];
+
+    // Official DevDay email always goes first
+    if (env.SMTP_USER && env.SMTP_PASS) {
+        pool.push(makeTransporter(env.SMTP_USER, env.SMTP_PASS, env.SMTP_FROM_EMAIL));
+    }
+
+    // Additional accounts appended after
     const accounts = env.SMTP_ACCOUNTS;
-
     if (accounts && accounts.length > 0) {
-        return accounts
-            .filter((a) => a.user && a.pass)
-            .map((a) => ({
-                fromEmail: a.fromEmail || a.user,
-                transporter: nodemailer.createTransport({
-                    host: env.SMTP_HOST,
-                    port: env.SMTP_PORT,
-                    secure: env.SMTP_SECURE,
-                    auth: { user: a.user, pass: a.pass },
-                }),
-            }));
+        for (const a of accounts) {
+            if (a.user && a.pass) {
+                pool.push(makeTransporter(a.user, a.pass, a.fromEmail));
+            }
+        }
     }
 
-    if (!env.SMTP_USER || !env.SMTP_PASS || !env.SMTP_FROM_EMAIL) {
-        return [];
-    }
-
-    return [
-        {
-            fromEmail: env.SMTP_FROM_EMAIL,
-            transporter: nodemailer.createTransport({
-                host: env.SMTP_HOST,
-                port: env.SMTP_PORT,
-                secure: env.SMTP_SECURE,
-                auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
-            }),
-        },
-    ];
+    return pool;
 }
 
 function getNextSender() {
